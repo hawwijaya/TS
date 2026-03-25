@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TyreSense Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <svg class="logo-icon" viewBox="0 0 24 24" width="28" height="28"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/><line x1="12" y1="2" x2="12" y2="6" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="1.5"/><line x1="2" y1="12" x2="6" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="18" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
+      <h1>TyreSense</h1>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Connection</h3>
+      <div id="connection-status" class="status-badge disconnected">
+        <span class="status-dot"></span> Not Connected
+      </div>
+      <button id="btn-connect" class="btn btn-primary btn-block">Connect to API</button>
+      <button id="btn-fleet" class="btn btn-accent btn-block" style="margin-top:6px;display:none;">Fleet Overview</button>
+      <button id="btn-diagnose" class="btn btn-outline btn-block" style="margin-top:6px;">Run Diagnostics</button>
+      <details class="settings-details">
+        <summary>API Settings</summary>
+        <div class="settings-form">
+          <label for="setting-host">API Host</label>
+          <input type="text" id="setting-host" class="settings-input" value="australia.tyresense.com" placeholder="australia.tyresense.com">
+          <label for="setting-token">JWT Token</label>
+          <textarea id="setting-token" class="settings-input settings-textarea" rows="3" placeholder="Paste JWT token here..."></textarea>
+          <button id="btn-save-settings" class="btn btn-primary btn-block" style="margin-top:6px;">Save Settings</button>
+        </div>
+      </details>
+      <hr style="border-color:var(--border);margin:10px 0;">
+      <button id="btn-demo" class="btn btn-secondary btn-block">Preview with Sample Data</button>
+      <p class="demo-hint">Sample data for UI preview only — not real truck data.</p>
+    </div>
+
+    <div class="sidebar-section" id="section-areas" style="display:none">
+      <h3>Areas</h3>
+      <div id="areas-list" class="nav-list"></div>
+    </div>
+
+    <div class="sidebar-section" id="section-vehicles" style="display:none">
+      <h3>Vehicles</h3>
+      <input type="text" id="vehicle-search" class="search-input" placeholder="Search vehicles...">
+      <div id="vehicles-list" class="nav-list"></div>
+    </div>
+  </aside>
+
+  <!-- Simulated Data Banner -->
+  <div id="demo-banner" class="demo-banner" style="display:none">
+    ⚠️ SIMULATED DATA — This is sample data for UI preview. Connect to the TyreSense API for real truck tyre data.
+    <button id="btn-dismiss-banner" class="banner-dismiss">&times;</button>
+  </div>
+
+  <!-- Diagnostics Modal -->
+  <div id="diagnostics-modal" class="modal-overlay" style="display:none">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Connection Diagnostics</h3>
+        <button id="btn-close-diag" class="modal-close">&times;</button>
+      </div>
+      <div id="diagnostics-results" class="diagnostics-results">
+        <p>Running diagnostics...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <main id="main-content">
+    <!-- Welcome Screen -->
+    <div id="welcome-screen" class="screen active">
+      <div class="welcome-content">
+        <svg viewBox="0 0 24 24" width="80" height="80" class="welcome-icon"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.3"/><circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="3 2"/></svg>
+        <h2>TyreSense Data Explorer</h2>
+        <p>Connect to the TyreSense API to view real-time and historical tyre data for your fleet.</p>
+        <p class="hint">Click <strong>Connect to API</strong> in the sidebar to get started.</p>
+        <div class="welcome-info">
+          <h4>Connection Requirements</h4>
+          <ul>
+            <li>Network access to the TyreSense server (australia.tyresense.com)</li>
+            <li>Valid JWT API token from TyreSense Client Settings</li>
+            <li>Do <strong>not</strong> use VPN — it may block the connection</li>
+            <li>Use <strong>Run Diagnostics</strong> to test connectivity</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="overlay" style="display:none">
+      <div class="spinner"></div>
+      <p id="loading-message">Loading...</p>
+    </div>
+
+    <!-- Fleet Overview Screen -->
+    <div id="fleet-screen" class="screen">
+      <div class="fleet-topbar">
+        <div class="fleet-topbar-left">
+          <h2>🚛 Fleet Overview</h2>
+          <span id="fleet-count" class="fleet-count"></span>
+        </div>
+        <div class="fleet-topbar-right">
+          <div id="fleet-refresh-info" class="fleet-refresh-info">
+            <span id="fleet-last-update"></span>
+            <span id="fleet-countdown" class="fleet-countdown"></span>
+          </div>
+          <select id="fleet-sort" class="fleet-sort">
+            <option value="criticality">Sort: Alert State</option>
+            <option value="name">Sort: Name</option>
+            <option value="lastcontact">Sort: Last Contact</option>
+          </select>
+          <button id="btn-fleet-refresh" class="btn btn-primary btn-sm">Refresh Now</button>
+        </div>
+      </div>
+      <div class="fleet-summary" id="fleet-summary">
+        <div class="fleet-stat" id="fleet-stat-total"><span class="fs-num">—</span><span class="fs-label">Total</span></div>
+        <div class="fleet-stat ok" id="fleet-stat-ok"><span class="fs-num">—</span><span class="fs-label">OK</span></div>
+        <div class="fleet-stat warn" id="fleet-stat-warn"><span class="fs-num">—</span><span class="fs-label">Warning</span></div>
+        <div class="fleet-stat critical" id="fleet-stat-critical"><span class="fs-num">—</span><span class="fs-label">Critical</span></div>
+        <div class="fleet-stat offline" id="fleet-stat-offline"><span class="fs-num">—</span><span class="fs-label">No Data</span></div>
+      </div>
+      <div class="fleet-body">
+        <div class="fleet-table-wrap">
+          <table class="fleet-table" id="fleet-table">
+            <thead>
+              <tr>
+                <th class="ft-vehicle">Vehicle</th>
+                <th class="ft-meta">Info</th>
+                <th class="ft-type"></th>
+                <th class="ft-pos">1</th>
+                <th class="ft-pos">2</th>
+                <th class="ft-pos">3</th>
+                <th class="ft-pos">4</th>
+                <th class="ft-pos">5</th>
+                <th class="ft-pos">6</th>
+                <th class="ft-age">Age</th>
+              </tr>
+            </thead>
+            <tbody id="fleet-tbody"></tbody>
+          </table>
+        </div><!-- end fleet-table-wrap -->
+        <div id="fleet-map" class="fleet-map"></div>
+      </div><!-- end fleet-body -->
+      <!-- Active Alerts Table -->
+      <div class="fleet-alerts-section" id="fleet-alerts-section" style="display:none">
+        <h3 class="fleet-alerts-title">⚠ Active Alerts</h3>
+        <table class="fleet-alerts-table" id="fleet-alerts-table">
+          <thead>
+            <tr>
+              <th>Alert Type</th>
+              <th>Severity</th>
+              <th>Vehicle / Position</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody id="fleet-alerts-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Dashboard Screen -->
+    <div id="dashboard-screen" class="screen">
+      <!-- Top Bar -->
+      <div class="dashboard-topbar">
+        <div class="breadcrumb" id="breadcrumb"></div>
+        <div class="date-range-controls">
+          <label>From</label>
+          <input type="datetime-local" id="start-time">
+          <label>To</label>
+          <input type="datetime-local" id="end-time">
+          <button id="btn-fetch-data" class="btn btn-primary">Fetch Data</button>
+        </div>
+      </div>
+
+      <!-- Vehicle Info Cards -->
+      <div id="vehicle-info-bar" class="info-bar">
+        <div class="info-card">
+          <span class="info-label">Vehicle</span>
+          <span class="info-value" id="info-vehicle-name">—</span>
+        </div>
+        <div class="info-card">
+          <span class="info-label">Type</span>
+          <span class="info-value" id="info-vehicle-type">—</span>
+        </div>
+        <div class="info-card">
+          <span class="info-label">Positions</span>
+          <span class="info-value" id="info-vehicle-positions">—</span>
+        </div>
+        <div class="info-card">
+          <span class="info-label">Controller</span>
+          <span class="info-value" id="info-vehicle-controller">—</span>
+        </div>
+        <div class="info-card">
+          <span class="info-label">Last Contact</span>
+          <span class="info-value" id="info-vehicle-lastcontact">—</span>
+        </div>
+      </div>
+
+      <!-- Vehicle Status Row -->
+      <div id="vehicle-status-row" class="status-row" style="display:none">
+        <div class="status-card" id="status-power">
+          <div class="status-icon">⚡</div>
+          <div class="status-label">Power</div>
+          <div class="status-value">—</div>
+        </div>
+        <div class="status-card" id="status-ignition">
+          <div class="status-icon">🔑</div>
+          <div class="status-label">Ignition</div>
+          <div class="status-value">—</div>
+        </div>
+        <div class="status-card" id="status-connected">
+          <div class="status-icon">📡</div>
+          <div class="status-label">Connected</div>
+          <div class="status-value">—</div>
+        </div>
+        <div class="status-card" id="status-gps">
+          <div class="status-icon">📍</div>
+          <div class="status-label">GPS</div>
+          <div class="status-value">—</div>
+        </div>
+      </div>
+
+      <!-- Charts Grid -->
+      <div class="charts-grid">
+        <div class="chart-card" id="chart-card-pressure">
+          <h3>Tyre Pressure (PSI)</h3>
+          <div class="chart-container">
+            <canvas id="chart-pressure"></canvas>
+          </div>
+        </div>
+        <div class="chart-card" id="chart-card-temperature">
+          <h3>Tyre Temperature (°C)</h3>
+          <div class="chart-container">
+            <canvas id="chart-temperature"></canvas>
+          </div>
+        </div>
+        <div class="chart-card full-width" id="chart-card-cold-pressure">
+          <h3>Cold Inflation Pressure (PSI)</h3>
+          <div class="chart-container">
+            <canvas id="chart-cold-pressure"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alert Status Table -->
+      <div class="table-card" id="alert-section" style="display:none">
+        <h3>Alert Status</h3>
+        <div class="table-wrapper">
+          <table id="alert-table">
+            <thead>
+              <tr>
+                <th>Position</th>
+                <th>Max Pressure Alert</th>
+                <th>Min Pressure Alert</th>
+                <th>Max Temp Alert</th>
+                <th>Sensor ID</th>
+                <th>Sensor Voltage</th>
+                <th>Battery</th>
+              </tr>
+            </thead>
+            <tbody id="alert-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Wheel Position Visual -->
+      <div class="table-card" id="wheel-visual-section" style="display:none">
+        <h3>Wheel Positions — Latest Readings</h3>
+        <div id="wheel-visual" class="wheel-visual-grid"></div>
+      </div>
+
+      <!-- No Data Message -->
+      <div id="no-data-message" class="no-data" style="display:none">
+        <p>No data available for the selected time range. Try adjusting the dates.</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Toast Container -->
+  <div id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
