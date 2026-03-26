@@ -56,8 +56,9 @@
 | Chart.js for visualisation | Lightweight, no build step, time-series support |
 | Batch API calls (1 truck/request) | API silently drops data in multi-vehicle requests; individual calls return all data |
 | 3-min full refresh + 1-min hot refresh | Trade freshness for staying under 4000 req/hr; hot trucks get priority monitoring |
-| Cache fleet wheeldata for drill-down | Avoid duplicate API calls; fleet stores full values[] array per position, drill-down reuses it |
-| Trend arrow ±2°C threshold | Suppress jitter — sensor noise within ±2° is not a meaningful trend |
+| Cache fleet wheeldata for drill-down | Removed — fleet now fetches only latest value; drill-down always makes own API call |
+| Trend arrow ±0.5°C threshold | Sensitive enough to catch real changes; compares current vs previous refresh cycle |
+| Fleet 5-min lookback window | Only fetch latest reading per sensor — minimise bandwidth; drill-down fetches full user-selected range |
 | Map z-order by status | Critical markers (zIndexOffset 300) always visible on top of OK/offline markers |
 | Online-only truck filtering | Skip trucks with no `lastContact` in past 1h — saves ~10 unnecessary API requests per cycle |
 | Temperature-only monitoring | Reduces API volume from ~5,700 MB/hr to ~660 MB/hr (under 1000 MB limit) |

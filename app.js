@@ -827,9 +827,9 @@
     if (trucks.length === 0) return;
 
     const now = new Date();
-    const hourAgo = new Date(now.getTime() - FLEET_DATA_LOOKBACK_HOURS * 3600000);
+    const lookbackAgo = new Date(now.getTime() - 30 * 60000); // 30-min lookback — sensors report every ~15-30 min
     const endT = now.toISOString();
-    const startT = hourAgo.toISOString();
+    const startT = lookbackAgo.toISOString();
 
     // IMPORTANT: The TyreSense API only returns data for the FIRST wheelValues
     // parameter per request, so we must make separate calls per value type.
@@ -864,14 +864,14 @@
       console.warn(`Fleet data: ${failCount}/${settled.length} batches failed (likely 503 rate limit)`);
     }
 
-    // Process results into per-vehicle data — keep full history for drill-down reuse + trend arrows
+    // Process results — store only latest value per position (minimal bandwidth)
     const fleetData = {};
     allResults.forEach(item => {
       const vid = item.vehicleId;
       if (!fleetData[vid]) {
         // Carry forward previous temps for trend comparison
         const prev = state.fleetData[vid];
-        fleetData[vid] = { temp: {}, prevTemp: prev ? { ...prev.temp } : {}, history: prev ? { ...prev.history } : {}, lastSampleTime: null };
+        fleetData[vid] = { temp: {}, prevTemp: prev ? { ...prev.temp } : {}, lastSampleTime: null };
       }
       const vals = item.values || [];
       const lastEntry = vals.length > 0 ? vals[vals.length - 1] : null;
@@ -886,7 +886,6 @@
       }
       if (item.valueType === 'Temperature') {
         fleetData[vid].temp[pos] = parseFloat(lastVal);
-        fleetData[vid].history[pos] = vals; // store full history for drill-down + trend
       }
     });
 
@@ -973,15 +972,13 @@
 
   // Get trend arrow for a position: compare last two readings from history
   function getTrendArrow(data, pos) {
-    if (!data.history || !data.history[pos]) return '';
-    const vals = data.history[pos];
-    if (vals.length < 2) return '';
-    const curr = parseFloat(vals[vals.length - 1].value);
-    const prev = parseFloat(vals[vals.length - 2].value);
-    if (isNaN(curr) || isNaN(prev)) return '';
+    if (!data.prevTemp || data.prevTemp[pos] === undefined) return '';
+    const curr = data.temp[pos];
+    const prev = data.prevTemp[pos];
+    if (curr === undefined || isNaN(curr) || isNaN(prev)) return '';
     const diff = curr - prev;
-    if (diff >= 2) return '<span class="trend-up" title="Rising +' + diff.toFixed(0) + '°"> ↑</span>';
-    if (diff <= -2) return '<span class="trend-down" title="Falling ' + diff.toFixed(0) + '°"> ↓</span>';
+    if (diff >= 0.5) return '<span class="trend-up" title="Rising +' + diff.toFixed(1) + '°"> ↑</span>';
+    if (diff <= -0.5) return '<span class="trend-down" title="Falling ' + diff.toFixed(1) + '°"> ↓</span>';
     return '<span class="trend-flat" title="Stable"> →</span>';
   }
 
@@ -1124,22 +1121,7 @@
     updateVehicleInfo(truck);
     setDefaultDateRange();
 
-    // Reuse cached fleet history if available (saves API requests)
-    const cached = state.fleetData[truck.vehicleId];
-    if (cached && cached.history && Object.keys(cached.history).length > 0) {
-      // Build wheelData structure from fleet cache
-      const wheelItems = [];
-      Object.entries(cached.history).forEach(([pos, vals]) => {
-        wheelItems.push({ vehicleId: truck.vehicleId, position: Number(pos), valueType: 'Temperature', values: vals });
-      });
-      state.wheelData = groupWheelData(wheelItems);
-      state.vehicleData = {}; // no vehicle telemetry cached from fleet
-      renderDashboard();
-      dom.noDataMessage.style.display = 'none';
-      toast(`Showing cached 1h data for ${truck.name} — change date range to fetch more`, 'info');
-    } else {
-      fetchVehicleData();
-    }
+    fetchVehicleData();
   }
 
   // ===================================================================
