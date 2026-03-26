@@ -1245,10 +1245,10 @@ body.demo-active #main-content {
   50% { background: transparent; color: #ff4444; }
 }
 
-/* Trend arrows next to temperature values */
-.trend-up { color: #ff4444; font-size: 0.6rem; vertical-align: middle; }
-.trend-down { color: #34d399; font-size: 0.6rem; vertical-align: middle; }
-.trend-flat { color: #5a6f82; font-size: 0.45rem; vertical-align: middle; }
+/* Trend arrows */
+.trend-up { color: #ff6b6b; font-weight: 700; font-size: 0.75rem; }
+.trend-down { color: #51cf66; font-weight: 700; font-size: 0.75rem; }
+.trend-flat { color: #868e96; font-size: 0.65rem; }
 
 /* Alert indicator icons on C row */
 .ft-alert-icon {

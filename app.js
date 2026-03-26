@@ -39,7 +39,7 @@
     charts: {},
     _demoVehicles: {},
     // Fleet overview state
-    fleetData: {},       // vehicleId -> { temp: {pos: val}, prevTemp: {pos: val}, tempHistory: {pos: [{start,value}...]}, lastSampleTime }
+    fleetData: {},       // vehicleId -> { temp: {pos: val}, prevTemp: {pos: val}, history: {pos: values[]}, lastSampleTime: isoString|null }
     fleetVehicles: [],   // haul trucks only
     fleetTimer: null,    // auto-refresh interval
     fleetCountdown: 60,  // seconds until next refresh
@@ -864,23 +864,17 @@
       console.warn(`Fleet data: ${failCount}/${settled.length} batches failed (likely 503 rate limit)`);
     }
 
-    // Process results into per-vehicle data
+    // Process results into per-vehicle data — keep full history for drill-down reuse + trend arrows
     const fleetData = {};
     allResults.forEach(item => {
       const vid = item.vehicleId;
       if (!fleetData[vid]) {
-        // Carry forward previous temperatures for trend arrows
+        // Carry forward previous temps for trend comparison
         const prev = state.fleetData[vid];
-        fleetData[vid] = {
-          temp: {},
-          prevTemp: prev ? { ...prev.temp } : {},
-          tempHistory: prev ? { ...prev.tempHistory } : {},
-          lastSampleTime: null
-        };
+        fleetData[vid] = { temp: {}, prevTemp: prev ? { ...prev.temp } : {}, history: prev ? { ...prev.history } : {}, lastSampleTime: null };
       }
-      const values = item.values || [];
-      if (values.length === 0) return;
-      const lastEntry = values[values.length - 1];
+      const vals = item.values || [];
+      const lastEntry = vals.length > 0 ? vals[vals.length - 1] : null;
       const lastVal = lastEntry ? lastEntry.value : null;
       if (lastVal === null) return;
       const pos = item.position;
@@ -892,12 +886,11 @@
       }
       if (item.valueType === 'Temperature') {
         fleetData[vid].temp[pos] = parseFloat(lastVal);
-        // Store full time series for drill-down reuse
-        fleetData[vid].tempHistory[pos] = values;
+        fleetData[vid].history[pos] = vals; // store full history for drill-down + trend
       }
     });
 
-    // Merge with existing fleetData (for trucks not re-fetched this cycle)
+    // For trucks not in this refresh batch, carry forward their existing data
     Object.keys(state.fleetData).forEach(vid => {
       if (!fleetData[vid]) fleetData[vid] = state.fleetData[vid];
     });
@@ -978,6 +971,20 @@
     return Math.max(...Object.values(data.temp));
   }
 
+  // Get trend arrow for a position: compare last two readings from history
+  function getTrendArrow(data, pos) {
+    if (!data.history || !data.history[pos]) return '';
+    const vals = data.history[pos];
+    if (vals.length < 2) return '';
+    const curr = parseFloat(vals[vals.length - 1].value);
+    const prev = parseFloat(vals[vals.length - 2].value);
+    if (isNaN(curr) || isNaN(prev)) return '';
+    const diff = curr - prev;
+    if (diff >= 2) return '<span class="trend-up" title="Rising +' + diff.toFixed(0) + '°"> ↑</span>';
+    if (diff <= -2) return '<span class="trend-down" title="Falling ' + diff.toFixed(0) + '°"> ↓</span>';
+    return '<span class="trend-flat" title="Stable"> →</span>';
+  }
+
   function sortFleetVehicles(trucks) {
     const sortBy = dom.fleetSort.value;
     const sorted = [...trucks];
@@ -1053,21 +1060,13 @@
       cellTypeT.innerHTML = `<span class="ft-type-indicator ft-type-t">T</span>`;
       row.appendChild(cellTypeT);
 
-      // Temperature values for positions 1-6
+      // Temperature values for positions 1-6 with trend arrows
       for (let pos = 1; pos <= 6; pos++) {
         const td = document.createElement('td');
         const temp = data.temp[pos];
         if (temp != null) {
           const cls = temp >= 85 ? 'val-critical' : temp >= 80 ? 'val-warn' : 'val-ok';
-          // Trend arrow: compare current temp with previous reading
-          const prev = data.prevTemp ? data.prevTemp[pos] : null;
-          let arrow = '';
-          if (prev != null) {
-            const diff = temp - prev;
-            if (diff >= 2) arrow = ' <span class="trend-up" title="Rising">▲</span>';
-            else if (diff <= -2) arrow = ' <span class="trend-down" title="Falling">▼</span>';
-            else arrow = ' <span class="trend-flat" title="Stable">▶</span>';
-          }
+          const arrow = getTrendArrow(data, pos);
           td.innerHTML = `<span class="ft-val ${cls}">${temp.toFixed(0)}°${arrow}</span>`;
         } else {
           td.innerHTML = `<span class="ft-val val-nodata">--</span>`;
@@ -1125,23 +1124,22 @@
     updateVehicleInfo(truck);
     setDefaultDateRange();
 
-    // If we have cached fleet temp history, render immediately then fetch full data
+    // Reuse cached fleet history if available (saves API requests)
     const cached = state.fleetData[truck.vehicleId];
-    if (cached && cached.tempHistory && Object.keys(cached.tempHistory).length > 0) {
-      // Build wheelData from cached fleet history for instant chart
+    if (cached && cached.history && Object.keys(cached.history).length > 0) {
+      // Build wheelData structure from fleet cache
       const wheelItems = [];
-      Object.entries(cached.tempHistory).forEach(([pos, values]) => {
-        wheelItems.push({ vehicleId: truck.vehicleId, position: Number(pos), valueType: 'Temperature', values });
+      Object.entries(cached.history).forEach(([pos, vals]) => {
+        wheelItems.push({ vehicleId: truck.vehicleId, position: Number(pos), valueType: 'Temperature', values: vals });
       });
       state.wheelData = groupWheelData(wheelItems);
-      state.vehicleData = {};
+      state.vehicleData = {}; // no vehicle telemetry cached from fleet
       renderDashboard();
       dom.noDataMessage.style.display = 'none';
-      toast('Showing cached fleet data — fetching full history...', 'info');
+      toast(`Showing cached 1h data for ${truck.name} — change date range to fetch more`, 'info');
+    } else {
+      fetchVehicleData();
     }
-
-    // Fetch full 24h data in background (will overwrite cached data)
-    fetchVehicleData();
   }
 
   // ===================================================================
@@ -1175,16 +1173,23 @@
     state.fleetMarkers.forEach(m => m.remove());
     state.fleetMarkers = [];
     const bounds = [];
-    Object.entries(state.fleetGps).forEach(([vehicleId, point]) => {
+
+    // Sort entries so hot/critical trucks render LAST (on top of z-stack)
+    const zOrder = { offline: 0, ok: 1, warn: 2, critical: 3 };
+    const sortedEntries = Object.entries(state.fleetGps).sort(([aId], [bId]) => {
+      const sa = zOrder[getTruckStatus(Number(aId))] ?? 0;
+      const sb = zOrder[getTruckStatus(Number(bId))] ?? 0;
+      return sa - sb; // lower status first, hot/critical last (on top)
+    });
+
+    sortedEntries.forEach(([vehicleId, point]) => {
       const vid = Number(vehicleId);
       const truck = state.fleetVehicles.find(t => t.vehicleId === vid);
       if (!truck || !point) return;
 
       const status = getTruckStatus(vid);
       const truckName = truck.name.trim().split(/\s+/)[0];
-
-      // Hot/critical trucks get higher z-index so they render on top
-      const zOffset = status === 'critical' ? 1000 : status === 'warn' ? 500 : 0;
+      const zIdx = (zOrder[status] ?? 0) * 100;
 
       const icon = L.divIcon({
         className: '',
@@ -1193,7 +1198,7 @@
         iconAnchor: [23, 9]
       });
 
-      const marker = L.marker([point.lat, point.lng], { icon, zIndexOffset: zOffset }).addTo(state.fleetMap);
+      const marker = L.marker([point.lat, point.lng], { icon, zIndexOffset: zIdx }).addTo(state.fleetMap);
 
       const data = state.fleetData[vid] || { temp: {} };
       const temps = Object.values(data.temp).map(v => v.toFixed(0) + '°C').join(', ') || '—';
