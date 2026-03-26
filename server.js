@@ -9,6 +9,7 @@ let apiHost = 'australia.tyresense.com';
 let apiProtocol = 'https';
 let apiPort = 443;
 const STATIC_DIR = __dirname;
+const envToken = process.env.TYRESENSE_JWT_TOKEN || process.env.JWT_SECRET || '';
 
 const MIME_TYPES = {
   '.html': 'text/html',
@@ -31,6 +32,9 @@ function proxyRequest(targetHost, targetPath, reqHeaders, res) {
   const headers = { ...reqHeaders, host: targetHost };
   delete headers['origin'];
   delete headers['referer'];
+  if (!headers.authorization && envToken) {
+    headers.authorization = envToken.startsWith('Bearer ') ? envToken : `Bearer ${envToken}`;
+  }
 
   function tryHttps() {
     const opts = {
@@ -202,7 +206,7 @@ const server = http.createServer((req, res) => {
   }
 
   // --- Diagnostics: /api-check ---
-  if (parsed.pathname === '/api-check') {
+  if (parsed.pathname === '/api-check' || parsed.pathname === '/api/check') {
     const host = parsed.query.host || apiHost;
     runDiagnostics(host, (results) => {
       res.writeHead(200, { 'content-type': 'application/json', ...CORS_HEADERS });
@@ -250,5 +254,5 @@ server.listen(PORT, () => {
   console.log(`  ─────────────────────────`);
   console.log(`  Local:  http://localhost:${PORT}`);
   console.log(`  API proxy: /api/* → ${apiHost} (HTTPS→HTTP fallback)`);
-  console.log(`  Diagnostics: http://localhost:${PORT}/api-check\n`);
+  console.log(`  Diagnostics: http://localhost:${PORT}/api/check\n`);
 });

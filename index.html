@@ -31,8 +31,8 @@
         <div class="settings-form">
           <label for="setting-host">API Host</label>
           <input type="text" id="setting-host" class="settings-input" value="australia.tyresense.com" placeholder="australia.tyresense.com">
-          <label for="setting-token">JWT Token</label>
-          <textarea id="setting-token" class="settings-input settings-textarea" rows="3" placeholder="Paste JWT token here..."></textarea>
+          <label for="setting-token">JWT Token (optional)</label>
+          <textarea id="setting-token" class="settings-input settings-textarea" rows="3" placeholder="Optional override for local testing. In Vercel use TYRESENSE_JWT_TOKEN."></textarea>
           <button id="btn-save-settings" class="btn btn-primary btn-block" style="margin-top:6px;">Save Settings</button>
         </div>
       </details>
@@ -85,7 +85,7 @@
           <h4>Connection Requirements</h4>
           <ul>
             <li>Network access to the TyreSense server (australia.tyresense.com)</li>
-            <li>Valid JWT API token from TyreSense Client Settings</li>
+            <li>Valid JWT API token configured server-side, or pasted in API Settings for local testing</li>
             <li>Do <strong>not</strong> use VPN — it may block the connection</li>
             <li>Use <strong>Run Diagnostics</strong> to test connectivity</li>
           </ul>

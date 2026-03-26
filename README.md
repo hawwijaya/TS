@@ -7,22 +7,38 @@ Real-time tyre monitoring dashboard for the TyreSense API (RIMEX Supply Ltd).
 ### Prerequisites
 - **Node.js** (v18 or later)
 - Network access to `australia.tyresense.com` over HTTPS (port 443)
-- Valid JWT API token (pre-configured for Roy Hill, clientId 26)
+- Valid JWT API token from TyreSense Client Settings
 - **Do NOT use VPN** — VPN may block the connection to the API server
 
 ### Run the Dashboard
 
 ```bash
 cd tyresense
+set TYRESENSE_JWT_TOKEN=your_token_here
 node server.js
 ```
 
 Open your browser to **http://localhost:3001**
 
+## Vercel Deployment
+
+This project is designed to run on Vercel using serverless API routes in `api/`.
+
+Required Vercel environment variables:
+
+- `TYRESENSE_JWT_TOKEN` — your TyreSense bearer token
+- `TYRESENSE_API_HOST` — optional, defaults to `australia.tyresense.com`
+
+Important deployment notes:
+
+- The frontend calls same-origin `/api/*` routes
+- Vercel must provide the proxy through the `api/` folder
+- Do not expose the JWT in client-side JavaScript
+
 ### Usage
 
 1. Click **Connect to API** in the sidebar
-2. If prompted, paste your JWT token in **API Settings**
+2. If needed for local testing, paste your JWT token in **API Settings**
 3. Select an area, then a vehicle
 4. Set the date range and click **Fetch Data** to view tyre data charts
 
@@ -45,9 +61,10 @@ If the connection fails, click **Run Diagnostics** to check:
 
 ### Configuration
 
-Edit API settings via the sidebar panel, or modify defaults in `app.js`:
+Edit API settings via the sidebar panel, or configure server environment variables:
 - `API_HOST` — default: `australia.tyresense.com`
-- `JWT_TOKEN` — pre-configured with Roy Hill token
+- `TYRESENSE_JWT_TOKEN` — recommended for local server and Vercel
+- `TYRESENSE_API_HOST` — optional override for the upstream TyreSense host
 
 ### API Reference
 
@@ -62,3 +79,8 @@ Based on [TyreSense Datastore API v1.0.0](https://app.swaggerhub.com/apis/tyrese
 ### Support
 
 Contact: info@rimex.com (RIMEX Supply Ltd, Vancouver, BC)
+
+### Security
+
+- Do not commit live TyreSense tokens to the repository
+- Rotate any token that was previously committed to Git history

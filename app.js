@@ -7,8 +7,9 @@
 
   // ---- Configuration (mutable — updated via Settings panel) ----
   let API_HOST = 'australia.tyresense.com';
-  let JWT_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQVBJIiwiaHR0cDovL3NjaGVtYXMueG1sc29hcC5vcmcvd3MvMjAwNS8wNS9pZGVudGl0eS9jbGFpbXMvaGFzaCI6IjViOXQ2czdzNjc4ZzI4c21yaDRuIiwiaHR0cDovL3R5cmVzZW5zZS5jb20vY2xhaW1zL2NsaWVudGlkIjoiMjYiLCJuYmYiOjE3NjkwMzk5ODYsImV4cCI6NDkyNDc5OTk4NiwiaWF0IjoxNzY5MDM5OTg2LCJpc3MiOiJUeXJlU2Vuc2UifQ.dg3qRzA3yk1iXYWbvQG4C9XA1A6waDgPWq5MR4g0QuQ';
+  let JWT_TOKEN = '';
   let API_BASE = window.location.origin + '/api';
+  const SETTINGS_KEY = 'tyresense-settings';
 
   const WHEEL_VALUE_TYPES = [
     'MinGaugePressure', 'MaxGaugePressure', 'Temperature', 'ColdPressure',
@@ -232,11 +233,14 @@
   async function apiGet(path) {
     const cleanPath = path.startsWith('/') ? path : '/' + path;
     const fullUrl = API_BASE + cleanPath;
+    const headers = {
+      'X-Api-Host': API_HOST
+    };
+    if (JWT_TOKEN) {
+      headers['Authorization'] = `Bearer ${JWT_TOKEN}`;
+    }
     const resp = await fetch(fullUrl, {
-      headers: {
-        'Authorization': `Bearer ${JWT_TOKEN}`,
-        'X-Api-Host': API_HOST
-      }
+      headers
     });
     if (!resp.ok) {
       const text = await resp.text();
@@ -1310,7 +1314,11 @@
     dom.diagModal.style.display = 'flex';
     dom.diagResults.innerHTML = '<p style="color:var(--text-muted)">Running diagnostics for <strong>' + escapeHtml(API_HOST) + '</strong>...</p>';
     try {
-      const resp = await fetch('/api-check?host=' + encodeURIComponent(API_HOST));
+      const headers = {};
+      if (JWT_TOKEN) {
+        headers['Authorization'] = `Bearer ${JWT_TOKEN}`;
+      }
+      const resp = await fetch('/api/check?host=' + encodeURIComponent(API_HOST), { headers });
       const data = await resp.json();
       let html = '';
 
@@ -1341,9 +1349,20 @@
     const host = dom.settingHost.value.trim();
     const token = dom.settingToken.value.trim();
     if (host) API_HOST = host;
-    if (token) JWT_TOKEN = token;
+    JWT_TOKEN = token;
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify({ host: API_HOST, token: JWT_TOKEN }));
     toast('Settings saved. Click Connect to API to use new settings.', 'success');
   }
+
+  // ---- Load persisted settings ----
+  try {
+    const saved = window.localStorage.getItem(SETTINGS_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.host) API_HOST = parsed.host;
+      if (parsed.token) JWT_TOKEN = parsed.token;
+    }
+  } catch (_) { /* ignore invalid stored settings */ }
 
   // ---- Populate settings fields ----
   dom.settingHost.value = API_HOST;
