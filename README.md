@@ -41,13 +41,14 @@ Important deployment notes:
 2. The **Fleet Overview** button stays disabled until a live connection is established
 3. If needed for local testing, paste your JWT token in **API Settings**
 4. Select an area, then a vehicle to view tyre detail charts
-5. Press **Reconnect** at any time to refresh live data and open **Fleet Overview** automatically when the refresh completes
+5. Press **Reconnect** at any time to switch into **Fleet Overview**, show the refresh/loading state, and reopen the live fleet once the refresh completes
 
 ### Connection Behavior
 
 - The sidebar is configured for live TyreSense data only
 - Sample-data preview and manual diagnostics actions are intentionally hidden from the default UI
 - If the connection fails, review **API Settings** and verify network access to `australia.tyresense.com`
+- Fleet refresh now loads tyre rows and map GPS together so the Fleet Overview screen does not appear finished while the map is still empty
 
 ### Files
 
@@ -88,3 +89,5 @@ Contact: info@rimex.com (RIMEX Supply Ltd, Vancouver, BC)
 
 - The TyreSense `/da/wheeldata` endpoint only honors the first `wheelValues` parameter in a request, so the dashboard fetches wheel value types separately and merges the results
 - The local Node proxy now guards its HTTPS-to-HTTP fallback path to avoid duplicate header writes during reconnect and fleet refresh bursts
+- Fleet Overview refresh now coordinates wheel data and GPS loading in parallel, then renders the table and map from the same refresh cycle
+- The local proxy uses keep-alive upstream agents to reduce repeated TLS connection setup during multi-request fleet refreshes

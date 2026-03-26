@@ -1,7 +1,7 @@
 # TyreSense Dashboard — Project Progress & Status
 
 **Last Updated**: 2026-03-26  
-**Sprint**: v2.1 — Fleet Refresh UX Hardening  
+**Sprint**: v2.2 — Fleet Refresh Visibility And Map Sync  
 **Server**: `australia.tyresense.com` (Azure, 23.101.230.162)
 
 ---
@@ -28,6 +28,9 @@
 | 16 | Sidebar simplified for live-only operation | ✅ Done | 2026-03-26 |
 | 17 | Reconnect refresh now opens Fleet Overview after live data loads | ✅ Done | 2026-03-26 |
 | 18 | Proxy fallback race fixed to prevent local server crashes | ✅ Done | 2026-03-26 |
+| 19 | Reconnect now transitions visibly into Fleet Overview during refresh | ✅ Done | 2026-03-26 |
+| 20 | Fleet map GPS load synchronised with fleet refresh | ✅ Done | 2026-03-26 |
+| 21 | Proxy keep-alive enabled for heavy fleet refresh traffic | ✅ Done | 2026-03-26 |
 
 ## Architecture Decisions
 
@@ -40,6 +43,8 @@
 | 60-second refresh | Balance between freshness and API load (sensors update every ~15-30 min) |
 | Reconnect opens fleet after refresh | Prioritise the production-like fleet workflow over manual navigation |
 | Live-only sidebar actions | Reduce operator confusion and remove non-production entry points |
+| Fleet table and map refresh together | Prevent the map from lagging behind the table and looking empty during a completed refresh |
+| Keep-alive upstream proxying | Reduce handshake churn and stabilise multi-request fleet refreshes |
 
 ## API Connectivity Log
 
@@ -72,6 +77,7 @@
 | Alert status data sparse | Low | Not all trucks have alert threshold config |
 | VPN blocks API connection | Info | Documented — do not use VPN |
 | Proxy fallback could write headers twice under retry load | High | Fixed 2026-03-26 |
+| Fleet refresh still takes noticeable time for a full 95-truck live load | Medium | Improved 2026-03-26; still bounded by upstream API volume |
 
 ## File Inventory
 
@@ -89,5 +95,6 @@
 
 - Removed sidebar actions for sample-data preview and manual diagnostics
 - Fleet Overview button now appears disabled until the first successful live connection
-- Reconnect now shows loading feedback, refreshes the live fleet dataset, and opens Fleet Overview automatically when ready
+- Reconnect now switches into Fleet Overview with visible refresh/loading feedback and restores live controls when the refresh completes
 - Development/testing banner added below the TyreSense title for local and test environments
+- Fleet map markers are now populated from the same refresh cycle as the fleet table instead of lagging behind on a later async step
