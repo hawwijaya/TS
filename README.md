@@ -38,17 +38,16 @@ Important deployment notes:
 ### Usage
 
 1. Click **Connect to API** in the sidebar
-2. If needed for local testing, paste your JWT token in **API Settings**
-3. Select an area, then a vehicle
-4. Set the date range and click **Fetch Data** to view tyre data charts
+2. The **Fleet Overview** button stays disabled until a live connection is established
+3. If needed for local testing, paste your JWT token in **API Settings**
+4. Select an area, then a vehicle to view tyre detail charts
+5. Press **Reconnect** at any time to refresh live data and open **Fleet Overview** automatically when the refresh completes
 
-### Diagnostics
+### Connection Behavior
 
-If the connection fails, click **Run Diagnostics** to check:
-- DNS resolution for the API host
-- TCP connectivity to port 443
-- TLS handshake status
-- HTTP port 80 availability
+- The sidebar is configured for live TyreSense data only
+- Sample-data preview and manual diagnostics actions are intentionally hidden from the default UI
+- If the connection fails, review **API Settings** and verify network access to `australia.tyresense.com`
 
 ### Files
 
@@ -84,3 +83,8 @@ Contact: info@rimex.com (RIMEX Supply Ltd, Vancouver, BC)
 
 - Do not commit live TyreSense tokens to the repository
 - Rotate any token that was previously committed to Git history
+
+### Implementation Notes
+
+- The TyreSense `/da/wheeldata` endpoint only honors the first `wheelValues` parameter in a request, so the dashboard fetches wheel value types separately and merges the results
+- The local Node proxy now guards its HTTPS-to-HTTP fallback path to avoid duplicate header writes during reconnect and fleet refresh bursts

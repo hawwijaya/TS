@@ -15,7 +15,10 @@
   <aside id="sidebar">
     <div class="sidebar-header">
       <svg class="logo-icon" viewBox="0 0 24 24" width="28" height="28"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/><line x1="12" y1="2" x2="12" y2="6" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="1.5"/><line x1="2" y1="12" x2="6" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="18" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
-      <h1>TyreSense</h1>
+      <div class="sidebar-header-text">
+        <h1>TyreSense</h1>
+        <div class="sidebar-header-note">Development &amp; Testing Only - kuatrinnus.wijaya@hio.com.au</div>
+      </div>
     </div>
 
     <div class="sidebar-section">
@@ -24,8 +27,7 @@
         <span class="status-dot"></span> Not Connected
       </div>
       <button id="btn-connect" class="btn btn-primary btn-block">Connect to API</button>
-      <button id="btn-fleet" class="btn btn-accent btn-block" style="margin-top:6px;display:none;">Fleet Overview</button>
-      <button id="btn-diagnose" class="btn btn-outline btn-block" style="margin-top:6px;">Run Diagnostics</button>
+      <button id="btn-fleet" class="btn btn-accent btn-block" style="margin-top:6px;" disabled>Fleet Overview</button>
       <details class="settings-details">
         <summary>API Settings</summary>
         <div class="settings-form">
@@ -36,9 +38,6 @@
           <button id="btn-save-settings" class="btn btn-primary btn-block" style="margin-top:6px;">Save Settings</button>
         </div>
       </details>
-      <hr style="border-color:var(--border);margin:10px 0;">
-      <button id="btn-demo" class="btn btn-secondary btn-block">Preview with Sample Data</button>
-      <p class="demo-hint">Sample data for UI preview only — not real truck data.</p>
     </div>
 
     <div class="sidebar-section" id="section-areas" style="display:none">
@@ -87,7 +86,7 @@
             <li>Network access to the TyreSense server (australia.tyresense.com)</li>
             <li>Valid JWT API token configured server-side, or pasted in API Settings for local testing</li>
             <li>Do <strong>not</strong> use VPN — it may block the connection</li>
-            <li>Use <strong>Run Diagnostics</strong> to test connectivity</li>
+            <li>Review API Settings if the connection does not come up cleanly</li>
           </ul>
         </div>
       </div>

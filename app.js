@@ -31,6 +31,7 @@
   // ---- State ----
   let state = {
     demoMode: false,
+    liveConnected: false,
     areas: [],
     vehicles: [],
     selectedArea: null,
@@ -40,7 +41,7 @@
     charts: {},
     _demoVehicles: {},
     // Fleet overview state
-    fleetData: {},       // vehicleId -> { pressure: {pos: val}, temp: {pos: val}, alerts: {pos: level} }
+    fleetData: {},       // vehicleId -> { pressure: {pos: val}, temp: {pos: val}, cold: {pos: val}, alerts: {pos: level}, lastSampleTime: isoString|null }
     fleetVehicles: [],   // haul trucks only
     fleetTimer: null,    // auto-refresh interval
     fleetCountdown: 60,  // seconds until next refresh
@@ -296,29 +297,32 @@
 
   // ---- Connect flow ----
   async function connect() {
-    showLoading('Connecting to TyreSense API...');
+    const isReconnect = state.liveConnected;
+    setConnectBusy(true, isReconnect ? 'Refreshing...' : 'Connecting...');
+    showLoading(isReconnect ? 'Refreshing live fleet data...' : 'Connecting to TyreSense API...');
     try {
       const areas = await apiGet('/da/areas');
       state.areas = areas;
       state.demoMode = false;
+      state.liveConnected = true;
       hideDemoBanner();
       setConnected('Live API');
-      toast('Connected to TyreSense API!', 'success');
+      if (isReconnect) {
+        await openFleetOverview({ deferScreen: true, forceReload: true });
+        toast('Fleet overview refreshed', 'success');
+      } else {
+        toast('Connected to TyreSense API!', 'success');
+      }
     } catch (err) {
       let detail = err.message || 'Unknown error';
       // Strip HTML from nginx error pages
       detail = detail.replace(/<[^>]+>/g, '').replace(/<!--.*?-->/g, '').replace(/\s{2,}/g, ' ').trim();
       if (detail.length > 120) detail = detail.substring(0, 120) + '...';
-      try {
-        const parsed = JSON.parse(detail);
-        if (parsed.troubleshooting) {
-          detail = parsed.error + '. Try Run Diagnostics for details.';
-        }
-      } catch (_) { /* not JSON */ }
-      toast('Connection failed — use Run Diagnostics for details', 'error');
-      dom.connectionStatus.className = 'status-badge disconnected';
-      dom.connectionStatus.innerHTML = '<span class="status-dot"></span> Connection Failed';
+      state.liveConnected = false;
+      toast('Connection failed. Check API settings and network access.', 'error');
+      setDisconnected('Connection Failed');
     } finally {
+      setConnectBusy(false);
       hideLoading();
     }
   }
@@ -346,9 +350,27 @@
     dom.connectionStatus.className = 'status-badge connected';
     dom.connectionStatus.innerHTML = '<span class="status-dot"></span> ' + escapeHtml(label);
     dom.connectBtn.textContent = 'Reconnect';
-    dom.fleetBtn.style.display = '';
+    dom.fleetBtn.disabled = false;
     renderAreas();
     dom.sectionAreas.style.display = 'block';
+  }
+
+  function setDisconnected(label = 'Not Connected') {
+    dom.connectionStatus.className = 'status-badge disconnected';
+    dom.connectionStatus.innerHTML = '<span class="status-dot"></span> ' + escapeHtml(label);
+    dom.fleetBtn.disabled = true;
+  }
+
+  function setConnectBusy(isBusy, label) {
+    dom.connectBtn.disabled = isBusy;
+    dom.connectBtn.classList.toggle('is-loading', isBusy);
+    if (isBusy) {
+      dom.connectBtn.textContent = label;
+      dom.fleetBtn.disabled = true;
+      return;
+    }
+    dom.connectBtn.textContent = state.liveConnected ? 'Reconnect' : 'Connect to API';
+    dom.fleetBtn.disabled = !state.liveConnected;
   }
 
   // ---- Render areas ----
@@ -464,22 +486,27 @@
         wheelResp = generateWheelTimeSeries(v.positions, basePSI, tempBase, startTime, endTime);
         vehResp = generateVehicleTimeSeries(startTime, endTime);
       } else {
-        // Build query params
-        const wheelParams = new URLSearchParams();
-        wheelParams.set('startTime', startTime);
-        wheelParams.set('endTime', endTime);
-        WHEEL_VALUE_TYPES.forEach(wv => wheelParams.append('wheelValues', wv));
-
         const vehicleParams = new URLSearchParams();
         vehicleParams.set('startTime', startTime);
         vehicleParams.set('endTime', endTime);
         VEHICLE_VALUE_TYPES.forEach(vv => vehicleParams.append('vehicleValues', vv));
 
-        // Parallel requests
-        [wheelResp, vehResp] = await Promise.all([
-          apiGet(`/da/wheeldata/${v.vehicleId}?${wheelParams.toString()}`),
+        // The upstream API only honors the first wheelValues entry per request.
+        const wheelRequests = WHEEL_VALUE_TYPES.map(valueType => {
+          const wheelParams = new URLSearchParams();
+          wheelParams.set('startTime', startTime);
+          wheelParams.set('endTime', endTime);
+          wheelParams.set('wheelValues', valueType);
+          return apiGet(`/da/wheeldata/${v.vehicleId}?${wheelParams.toString()}`);
+        });
+
+        const [wheelResults, vehicleResult] = await Promise.all([
+          Promise.all(wheelRequests),
           apiGet(`/da/vehicledata/${v.vehicleId}?${vehicleParams.toString()}`)
         ]);
+
+        wheelResp = wheelResults.flat();
+        vehResp = vehicleResult;
       }
 
       state.wheelData = groupWheelData(wheelResp);
@@ -755,10 +782,12 @@
     const maxP = wd.MaxGaugePressure || {};
     const temp = wd.Temperature || {};
     const maxPA = wd.MaxPressureAlertStatus || {};
+    const minPA = wd.MinPressureAlertStatus || {};
+    const maxTA = wd.MaxTemperatureAlertStatus || {};
     const cp = wd.ColdPressure || {};
 
     const allPositions = new Set();
-    [maxP, temp, maxPA, cp].forEach(obj => {
+    [maxP, temp, maxPA, minPA, maxTA, cp].forEach(obj => {
       Object.keys(obj).forEach(p => allPositions.add(p));
     });
 
@@ -781,7 +810,10 @@
       const pressure = lastVal(maxP[pos]);
       const temperature = lastVal(temp[pos]);
       const coldP = lastVal(cp[pos]);
-      const alert = lastVal(maxPA[pos]);
+      const alertCandidates = [lastVal(maxPA[pos]), lastVal(minPA[pos]), lastVal(maxTA[pos])].filter(Boolean);
+      const alert = alertCandidates.reduce((worst, current) => {
+        return alertSeverity(current) > alertSeverity(worst) ? current : worst;
+      }, 'None');
 
       // Determine status
       if (alert === 'Level2') card.classList.add('critical');
@@ -807,13 +839,22 @@
   const FLEET_BATCH_SIZE = 10;       // trucks per API call
   const FLEET_CONCURRENCY = 4;       // parallel API calls
 
-  async function openFleetOverview() {
+  async function openFleetOverview(options = {}) {
+    const { deferScreen = false, forceReload = false } = options;
+    if (forceReload) {
+      state.fleetVehicles = [];
+    }
+
     // Load vehicles for Roy Hill Mine (areaId 32) if not already loaded
     if (state.fleetVehicles.length === 0) {
-      showLoading('Loading fleet vehicles...');
+      if (!deferScreen) showLoading('Loading fleet vehicles...');
       try {
         const area = state.areas.find(a => a.areaId === 32) || state.areas[0];
-        if (!area) { toast('No area found', 'error'); hideLoading(); return; }
+        if (!area) {
+          toast('No area found', 'error');
+          if (!deferScreen) hideLoading();
+          return;
+        }
         state.selectedArea = area;
         const vehicles = await apiGet(`/da/vehicles/area/${area.areaId}`);
         state.vehicles = vehicles;
@@ -824,17 +865,22 @@
         dom.sectionVehicles.style.display = 'block';
       } catch (err) {
         toast('Failed to load vehicles: ' + err.message, 'error');
-        hideLoading();
+        if (!deferScreen) hideLoading();
         return;
       }
-      hideLoading();
+      if (!deferScreen) hideLoading();
     }
 
-    showScreen(dom.fleetScreen);
+    if (!deferScreen) {
+      showScreen(dom.fleetScreen);
+    }
     dom.fleetCount.textContent = state.fleetVehicles.length + ' haul trucks';
     initFleetMap();
     await fetchFleetData();
     startFleetAutoRefresh();
+    if (deferScreen) {
+      showScreen(dom.fleetScreen);
+    }
   }
 
   async function fetchFleetData() {
@@ -851,7 +897,7 @@
 
     // IMPORTANT: The TyreSense API only returns data for the FIRST wheelValues
     // parameter per request, so we must make separate calls per value type.
-    const valueTypes = ['MinGaugePressure', 'Temperature', 'MaxPressureAlertStatus', 'MinPressureAlertStatus', 'MaxTemperatureAlertStatus'];
+    const valueTypes = ['MinGaugePressure', 'Temperature', 'ColdPressure', 'MaxPressureAlertStatus', 'MinPressureAlertStatus', 'MaxTemperatureAlertStatus'];
 
     // Split trucks into batches
     const batchIds = [];
@@ -881,16 +927,24 @@
     const fleetData = {};
     allResults.forEach(item => {
       const vid = item.vehicleId;
-      if (!fleetData[vid]) fleetData[vid] = { pressure: {}, temp: {}, alerts: {} };
-      const lastVal = item.values && item.values.length > 0 ? item.values[item.values.length - 1].value : null;
+      if (!fleetData[vid]) fleetData[vid] = { pressure: {}, temp: {}, cold: {}, alerts: {}, lastSampleTime: null };
+      const lastEntry = item.values && item.values.length > 0 ? item.values[item.values.length - 1] : null;
+      const lastVal = lastEntry ? lastEntry.value : null;
       if (lastVal === null) return;
       const pos = item.position;
+      const sampleTime = lastEntry && (lastEntry.start || lastEntry.timestamp || lastEntry.time);
+      if (sampleTime && (!fleetData[vid].lastSampleTime || new Date(sampleTime) > new Date(fleetData[vid].lastSampleTime))) {
+        fleetData[vid].lastSampleTime = sampleTime;
+      }
       switch (item.valueType) {
         case 'MinGaugePressure':
           fleetData[vid].pressure[pos] = parseFloat(lastVal);
           break;
         case 'Temperature':
           fleetData[vid].temp[pos] = parseFloat(lastVal);
+          break;
+        case 'ColdPressure':
+          fleetData[vid].cold[pos] = parseFloat(lastVal);
           break;
         case 'MaxPressureAlertStatus':
         case 'MinPressureAlertStatus':
@@ -961,7 +1015,7 @@
       const vid = truck.vehicleId;
       const status = getTruckStatus(vid);
       counts[status]++;
-      const data = state.fleetData[vid] || { pressure: {}, temp: {}, alerts: {} };
+      const data = state.fleetData[vid] || { pressure: {}, temp: {}, cold: {}, alerts: {}, lastSampleTime: null };
 
       // Name parts: e.g. "DT034 793F" → id="DT034", model="793F"
       const parts = truck.name.trim().split(/\s+/);
@@ -969,7 +1023,7 @@
       const model = parts.length > 1 ? parts.slice(1).join(' ') : '';
 
       // Compute data age
-      const ageStr = getDataAge(truck.lastContact);
+      const ageStr = getDataAge(data.lastSampleTime || truck.lastContact);
 
       // Collect active alerts for alert table
       for (let pos = 1; pos <= 6; pos++) {
@@ -1057,7 +1111,7 @@
       }
       dom.fleetTbody.appendChild(rowT);
 
-      // ── Row 3: Criticality (C) ──
+      // ── Row 3: Cold pressure (C) ──
       const rowC = document.createElement('tr');
       rowC.className = 'ft-row-c';
       rowC.dataset.vehicleId = vid;
@@ -1068,13 +1122,11 @@
 
       for (let pos = 1; pos <= 6; pos++) {
         const td = document.createElement('td');
+        const cold = data.cold[pos];
         const alert = data.alerts[pos] || 'None';
-        if (alertSeverity(alert) >= 2) {
-          td.innerHTML = `<span class="ft-alert-icon alert-l2">2</span>`;
-        } else if (alertSeverity(alert) >= 1) {
-          td.innerHTML = `<span class="ft-alert-icon alert-l1">1</span>`;
-        } else if (data.pressure[pos] != null) {
-          td.innerHTML = `<span class="ft-alert-icon alert-ok">✓</span>`;
+        if (cold != null) {
+          const cls = alertSeverity(alert) >= 2 ? 'val-critical' : alertSeverity(alert) >= 1 ? 'val-warn' : 'val-ok';
+          td.innerHTML = `<span class="ft-val ${cls}">${cold.toFixed(0)}</span>`;
         } else {
           td.innerHTML = `<span class="ft-val val-nodata">--</span>`;
         }
@@ -1370,7 +1422,9 @@
 
   // ---- Event Listeners ----
   dom.connectBtn.addEventListener('click', connect);
-  dom.diagnoseBtn.addEventListener('click', runDiagnostics);
+  if (dom.diagnoseBtn) {
+    dom.diagnoseBtn.addEventListener('click', runDiagnostics);
+  }
   dom.saveSettingsBtn.addEventListener('click', saveSettings);
   dom.closeDiagBtn.addEventListener('click', () => { dom.diagModal.style.display = 'none'; });
   dom.diagModal.addEventListener('click', (e) => { if (e.target === dom.diagModal) dom.diagModal.style.display = 'none'; });

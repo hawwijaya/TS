@@ -36,6 +36,26 @@ function proxyRequest(targetHost, targetPath, reqHeaders, res) {
     headers.authorization = envToken.startsWith('Bearer ') ? envToken : `Bearer ${envToken}`;
   }
 
+  let completed = false;
+  let fallbackStarted = false;
+
+  function pipeResponse(apiRes) {
+    if (completed || res.writableEnded || res.destroyed) {
+      apiRes.resume();
+      return;
+    }
+    completed = true;
+    const respHeaders = { ...apiRes.headers, ...CORS_HEADERS };
+    res.writeHead(apiRes.statusCode, respHeaders);
+    apiRes.pipe(res, { end: true });
+  }
+
+  function tryFallback() {
+    if (completed || fallbackStarted || res.writableEnded || res.destroyed) return;
+    fallbackStarted = true;
+    tryHttp();
+  }
+
   function tryHttps() {
     const opts = {
       hostname: targetHost,
@@ -47,17 +67,15 @@ function proxyRequest(targetHost, targetPath, reqHeaders, res) {
       timeout: 12000
     };
     const proxy = https.request(opts, (apiRes) => {
-      const respHeaders = { ...apiRes.headers, ...CORS_HEADERS };
-      res.writeHead(apiRes.statusCode, respHeaders);
-      apiRes.pipe(res, { end: true });
+      pipeResponse(apiRes);
     });
     proxy.on('error', (err) => {
       console.error('HTTPS proxy error:', err.message);
-      tryHttp();
+      tryFallback();
     });
     proxy.on('timeout', () => {
       proxy.destroy();
-      tryHttp();
+      tryFallback();
     });
     proxy.end();
   }
@@ -72,12 +90,12 @@ function proxyRequest(targetHost, targetPath, reqHeaders, res) {
       timeout: 10000
     };
     const proxy = http.request(opts, (apiRes) => {
-      const respHeaders = { ...apiRes.headers, ...CORS_HEADERS };
-      res.writeHead(apiRes.statusCode, respHeaders);
-      apiRes.pipe(res, { end: true });
+      pipeResponse(apiRes);
     });
     proxy.on('error', (err) => {
       console.error('HTTP proxy error:', err.message);
+      if (completed || res.writableEnded || res.destroyed) return;
+      completed = true;
       res.writeHead(502, { 'content-type': 'application/json', ...CORS_HEADERS });
       res.end(JSON.stringify({
         error: 'API unreachable',
@@ -93,6 +111,8 @@ function proxyRequest(targetHost, targetPath, reqHeaders, res) {
     });
     proxy.on('timeout', () => {
       proxy.destroy();
+      if (completed || res.writableEnded || res.destroyed) return;
+      completed = true;
       res.writeHead(504, { 'content-type': 'application/json', ...CORS_HEADERS });
       res.end(JSON.stringify({ error: 'Connection timeout', host: targetHost }));
     });

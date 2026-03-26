@@ -1,7 +1,7 @@
 # TyreSense Dashboard — Project Progress & Status
 
-**Last Updated**: 2026-03-25  
-**Sprint**: v2.0 — Fleet Overview  
+**Last Updated**: 2026-03-26  
+**Sprint**: v2.1 — Fleet Refresh UX Hardening  
 **Server**: `australia.tyresense.com` (Azure, 23.101.230.162)
 
 ---
@@ -24,6 +24,10 @@
 | 12 | Drill-down from fleet → vehicle detail | ✅ Done | 2026-03-25 |
 | 13 | Separate wheel data API fetches to get temperatures correctly | ✅ Done | 2026-03-25 |
 | 14 | Leaflet map integration with color-coded full-ID markers | ✅ Done | 2026-03-26 |
+| 15 | Vehicle detail fixed to fetch all wheel value types correctly | ✅ Done | 2026-03-26 |
+| 16 | Sidebar simplified for live-only operation | ✅ Done | 2026-03-26 |
+| 17 | Reconnect refresh now opens Fleet Overview after live data loads | ✅ Done | 2026-03-26 |
+| 18 | Proxy fallback race fixed to prevent local server crashes | ✅ Done | 2026-03-26 |
 
 ## Architecture Decisions
 
@@ -34,6 +38,8 @@
 | Chart.js for visualisation | Lightweight, no build step, time-series support |
 | Batch API calls (10 trucks/request) | Avoid URL length limits, parallel for speed |
 | 60-second refresh | Balance between freshness and API load (sensors update every ~15-30 min) |
+| Reconnect opens fleet after refresh | Prioritise the production-like fleet workflow over manual navigation |
+| Live-only sidebar actions | Reduce operator confusion and remove non-production entry points |
 
 ## API Connectivity Log
 
@@ -65,6 +71,7 @@
 | Temperature data sparse on some trucks | Low | API returns only value types with data |
 | Alert status data sparse | Low | Not all trucks have alert threshold config |
 | VPN blocks API connection | Info | Documented — do not use VPN |
+| Proxy fallback could write headers twice under retry load | High | Fixed 2026-03-26 |
 
 ## File Inventory
 
@@ -77,3 +84,10 @@
 | `README.md` | Setup & deployment guide | ~55 |
 | `docs/PRD.md` | Product Requirements Document | — |
 | `docs/PROGRESS.md` | This file | — |
+
+## Latest UX Changes
+
+- Removed sidebar actions for sample-data preview and manual diagnostics
+- Fleet Overview button now appears disabled until the first successful live connection
+- Reconnect now shows loading feedback, refreshes the live fleet dataset, and opens Fleet Overview automatically when ready
+- Development/testing banner added below the TyreSense title for local and test environments
