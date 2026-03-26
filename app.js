@@ -954,15 +954,28 @@
     return 'ok';
   }
 
+  function getMaxTemp(vid) {
+    const data = state.fleetData[vid];
+    if (!data || Object.keys(data.temp).length === 0) return -Infinity;
+    return Math.max(...Object.values(data.temp));
+  }
+
   function sortFleetVehicles(trucks) {
     const sortBy = dom.fleetSort.value;
     const sorted = [...trucks];
     if (sortBy === 'criticality') {
-      const order = { critical: 0, warn: 1, ok: 2, offline: 3 };
+      // Sort by max temperature descending (hottest first), offline trucks at the bottom
       sorted.sort((a, b) => {
-        const sa = order[getTruckStatus(a.vehicleId)] ?? 4;
-        const sb = order[getTruckStatus(b.vehicleId)] ?? 4;
-        return sa - sb || a.name.localeCompare(b.name);
+        const ta = getMaxTemp(a.vehicleId);
+        const tb = getMaxTemp(b.vehicleId);
+        // Both have no data → sort by name
+        if (ta === -Infinity && tb === -Infinity) return a.name.localeCompare(b.name);
+        // One has no data → push to bottom
+        if (ta === -Infinity) return 1;
+        if (tb === -Infinity) return -1;
+        // Both have data → highest temp first
+        if (tb !== ta) return tb - ta;
+        return a.name.localeCompare(b.name);
       });
     } else if (sortBy === 'name') {
       sorted.sort((a, b) => a.name.localeCompare(b.name));
