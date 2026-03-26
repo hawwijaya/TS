@@ -1,8 +1,8 @@
-# TyreSense Fleet Dashboard — Product Requirements Document
+# HotTyre Sense — Product Requirements Document
 
-**Product**: TyreSense Fleet Dashboard  
-**Version**: 2.0  
-**Date**: 2026-03-25  
+**Product**: HotTyre Sense (Temperature-Focused Fleet Monitoring)  
+**Version**: 3.1  
+**Date**: 2026-03-26  
 **Author**: Product Owner / Senior Tech Lead  
 **Client**: Hancock Iron Ore (Roy Hill Mine)
 
@@ -10,7 +10,7 @@
 
 ## 1. Executive Summary
 
-A real-time web dashboard for monitoring tyre health across Roy Hill Mine's haul truck fleet. Connects to the TyreSense Datastore API (`australia.tyresense.com`) to display live pressure, temperature, and alert criticality for all 95 haul trucks simultaneously — enabling mine operations to detect tyre issues before they cause downtime or safety incidents.
+A real-time web dashboard for monitoring tyre **temperature** across Roy Hill Mine's haul truck fleet. Connects to the TyreSense Datastore API (`australia.tyresense.com`) to display live temperature data for all 95 haul trucks simultaneously — enabling mine operations to detect overheating tyres before they cause downtime or safety incidents. Rebranded from "TyreSense Dashboard" to "HotTyre Sense" in v3.0.
 
 ## 2. Problem Statement
 
@@ -67,9 +67,55 @@ Roy Hill's fleet of 95 haul trucks (Cat 793F, Hitachi EH4000, EH5000) operates 2
 
 - **Update interval**: ~15-30 minutes per sensor
 - **Data returned**: Only value types with actual data are included
-- **Vehicle IDs**: Comma-separated list supported in path
+- **Vehicle IDs**: Comma-separated list supported in path (but see Known API Bugs below)
 - **Time format**: ISO 8601 without timezone (server is UTC)
 - **Area timezone**: `australia/perth` (AWST, UTC+8)
+
+### 4.5 API Audit — Swagger Spec vs Implementation (2026-03-26)
+
+Full audit performed against [Swagger spec v1.0.0](https://app.swaggerhub.com/apis/tyresense/datastore/1.0.0).
+
+#### Authentication
+
+The spec supports two auth methods:
+1. **BearerAuth** — `Authorization: Bearer <JWT>` header (used by our app — **preferred**, avoids token leaking in URLs/logs)
+2. **AccessToken** — `?access_token=<JWT>` query parameter (not used — **correct decision**)
+
+#### Known API Bugs (documented via testing)
+
+| Bug | Impact | Workaround |
+|-----|--------|------------|
+| Multi-vehicle `wheeldata` returns only 1st vehicle's data | Data loss for 94 of 95 trucks when batched | `FLEET_BATCH_SIZE = 1` — individual requests per truck |
+| `wheelValues` array param only honors 1st entry | Can't fetch Temperature + Pressure in one call | Separate request per value type (moot — we only use Temperature) |
+
+#### Rate Limit
+
+- **Limit**: 4,000 requests per hour (discovered via 503 responses)
+- **Smart refresh strategy** (v3.1):
+  - Vehicle list (1 lightweight request) determines total rows + online/offline status
+  - Only **online trucks** (lastContact within 1h) are queried — offline trucks skipped
+  - **Full refresh every 3 minutes**: vehicle list + online wheeldata + online GPS
+  - **Hot truck fast refresh every 1 minute**: only trucks ≥80°C get re-queried (temp only, no GPS)
+  - Estimated: ~3,400 requests/hour (under 4,000 limit)
+
+#### Unused Endpoints — Potential Future Value
+
+| Endpoint | What it provides | Potential use |
+|----------|-----------------|---------------|
+| `/da/assets/get/area/{areaId}?type=5` | Sensor assets with lifetime high-temp hours, error counts, battery health | Sensor health dashboard without polling wheeldata |
+| `/da/assets/metadata/{assetIds}?keys=maximumTireTempratureAboveEqual90` | Historical sensor metadata | Track sensor degradation over time |
+| `WheelValueType: SensorVoltage, SensorError, SensorLowBattery` | Sensor health data | Proactive maintenance alerts |
+| `VehicleValueType: Power, Ignition` | Vehicle on/off state | Could skip powered-off trucks to further reduce requests |
+
+#### Parameter Usage Audit
+
+| Parameter | Spec | Our Usage | Status |
+|-----------|------|-----------|--------|
+| `wheelValues` | Array (multiple types per request) | Single value per request | Correct (API bug workaround) |
+| `vehicleValues` | Array | `URLSearchParams.append()` for each | Correct |
+| `positions` | Optional array (filter wheel positions) | Not used (fetches all 6) | OK — we display all positions |
+| `startTime`/`endTime` | ISO 8601 date-time | `new Date().toISOString()` | Correct |
+| `clientId` | Optional on `/da/areas` | Not sent (JWT implies client) | Correct |
 
 ## 5. Fleet Inventory (Roy Hill Mine, areaId=32)
 
@@ -125,21 +171,27 @@ Roy Hill's fleet of 95 haul trucks (Cat 793F, Hitachi EH4000, EH5000) operates 2
                                    └──────────────────────┘
 ```
 
-### 7.1 Batch Data Strategy
+### 7.1 Smart Refresh Strategy (v3.1)
 
-The API supports comma-separated vehicleIds. To fetch data for 95 trucks:
-- **Batch size**: 10-15 trucks per request (avoid URL length limits)
-- **Parallel batches**: 3-4 concurrent requests
+The API's multi-vehicle endpoint is broken (returns only 1 vehicle's data), so we use individual requests:
+
+- **Batch size**: 1 truck per request (workaround for API bug)
+- **Parallel requests**: 3 concurrent (keeps below rate limit)
 - **Time window**: Last 1 hour (rolling)
-- **Value types**: MinGaugePressure, Temperature, MaxPressureAlertStatus, MinPressureAlertStatus, MaxTemperatureAlertStatus
+- **Value types**: Temperature only (HotTyre Sense focus)
+- **Online filter**: Only trucks with `lastContact` within 1h are queried
+- **Two-tier refresh**:
+  - **Full cycle (180s)**: Vehicle list + online trucks wheeldata + GPS
+  - **Hot cycle (60s)**: Only trucks ≥80°C get re-queried (temperature only)
+- **Request budget**: ~3,400/hr out of 4,000/hr limit
 
-## 8. Criticality Matrix
+## 8. Temperature Criticality Matrix
 
 | Condition | Level | Color | Action |
 |-----------|-------|-------|--------|
-| All readings normal | OK | 🟢 Green | Normal operation |
-| Any Level1 alert | Warning | 🟡 Yellow | Monitor closely |
-| Any Level2 alert | Critical | 🔴 Red | Immediate attention |
+| All temps < 80°C | OK | 🟢 Green | Normal operation |
+| Any tyre ≥ 80°C | Hot | 🟡 Amber | Monitor closely (1-min refresh) |
+| Any tyre ≥ 85°C | Overheating | 🔴 Flashing Red | Immediate attention (1-min refresh) |
 | No data / stale (>1h) | Offline | ⚪ Grey | Check sensor/comms |
 
 ## 9. Non-Functional Requirements
@@ -150,11 +202,18 @@ The API supports comma-separated vehicleIds. To fetch data for 95 trucks:
 - **Dependencies**: Chart.js (CDN), no build tools required
 - **Security**: JWT token stored client-side, proxied through Node server, never exposed to browser network tab as query param
 
-## 10. Out of Scope (v2.0)
+## 10. Out of Scope (v3.1)
 
 - Historical reporting / export to CSV
-- GPS map visualisation
 - Push notifications / alerting
 - Multi-area or multi-client support
 - Mobile responsive layout (desktop-first)
 - User authentication / login page
+- Pressure / Cold Pressure / Alert Status monitoring (removed in v3.0)
+- Sensor health dashboard (potential future — see section 4.5)
+
+## 11. Security Notes
+
+- JWT token via Bearer header (never in query string)
+- `rejectUnauthorized: false` in proxy — acceptable for dev/demo; should be `true` for production
+- Server subdomain is configurable via UI settings (default: `australia.tyresense.com`)

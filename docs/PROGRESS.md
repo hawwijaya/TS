@@ -39,6 +39,9 @@
 | 27 | Auto-open Fleet Overview on first connect (not just reconnect) | ✅ Done | 2026-03-26 |
 | 28 | API batch size fix: 1 vehicle per request (API drops multi-vehicle data silently) | ✅ Done | 2026-03-26 |
 | 29 | Fleet data: 71 trucks with data (up from 10 with old batch-of-10 approach) | ✅ Done | 2026-03-26 |
+| 30 | Age display fixed: use vehicle `lastContact` instead of wheeldata `start` time | ✅ Done | 2026-03-26 |
+| 31 | Smart refresh: only query online trucks, 3-min full cycle, 1-min hot-truck cycle | ✅ Done | 2026-03-26 |
+| 32 | API audit vs Swagger spec: documented bugs, rate limit strategy, unused endpoints | ✅ Done | 2026-03-26 |
 
 ## Architecture Decisions
 
@@ -48,7 +51,8 @@
 | Node.js proxy server | CORS bypass, HTTPS handling, static file serving |
 | Chart.js for visualisation | Lightweight, no build step, time-series support |
 | Batch API calls (1 truck/request) | API silently drops data in multi-vehicle requests; individual calls return all data |
-| 60-second refresh | Balance between freshness and API load (sensors update every ~15-30 min) |
+| 3-min full refresh + 1-min hot refresh | Trade freshness for staying under 4000 req/hr; hot trucks get priority monitoring |
+| Online-only truck filtering | Skip trucks with no `lastContact` in past 1h — saves ~10 unnecessary API requests per cycle |
 | Temperature-only monitoring | Reduces API volume from ~5,700 MB/hr to ~660 MB/hr (under 1000 MB limit) |
 | 1-hour lookback window | Minimise data re-fetch; sensors update every ~15-30 min so 1h captures latest |
 | Reconnect opens fleet after refresh | Prioritise the production-like fleet workflow over manual navigation |
@@ -89,8 +93,10 @@
 | VPN blocks API connection | Info | Documented — do not use VPN |
 | Proxy fallback could write headers twice under retry load | High | Fixed 2026-03-26 |
 | API multi-vehicle wheeldata returns only 1 vehicle's data | High | Fixed — switched to batch size 1 |
-| API rate limit 1000 MB/hour | High | Fixed — reduced to Temperature only + 1h lookback |
+| API rate limit 4000 requests/hour | High | Fixed — smart refresh: 3-min cycle, online-only trucks, 1-min hot-truck cycle (~3,400 req/hr) |
 | API timestamps omit timezone information | Medium | Fixed in app parsing on 2026-03-26 |
+| Age display uses wheeldata start (too old) | Medium | Fixed — now uses vehicle `lastContact` (controller heartbeat) |
+| `rejectUnauthorized: false` in proxy | Low (dev) | Acceptable for demo; document for production hardening |
 
 ## File Inventory
 
@@ -118,4 +124,8 @@
 - Temperature thresholds: >=80°C amber highlight, >=85°C flashing red animation
 - Fleet summary labels changed: Warning→Hot, Critical→Overheating
 - Connect to API now auto-opens Fleet Overview immediately
+- Age column now shows vehicle `lastContact` (controller heartbeat) instead of wheeldata `start` time — matches official TyreSense app
+- Smart two-tier auto-refresh: 3-minute full cycle for all online trucks, 1-minute fast cycle for hot trucks (≥80°C)
+- Countdown timer shows 🔥 when hot trucks exist and a fast refresh is coming
+- Only online trucks (lastContact within 1h) are queried — offline trucks skipped to save API quota
 - Batch size changed from 10 to 1 per API call — fixed silent data loss affecting 61 trucks

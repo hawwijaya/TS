@@ -713,11 +713,13 @@
   //  FLEET OVERVIEW — All Haul Trucks on One Page
   // ===================================================================
 
-  const FLEET_REFRESH_INTERVAL = 60; // seconds
+  const FLEET_REFRESH_INTERVAL = 180; // seconds — normal full refresh (online trucks)
+  const FLEET_HOT_REFRESH_INTERVAL = 60; // seconds — fast refresh for hot trucks only
   const FLEET_BATCH_SIZE = 1;        // 1 truck per API call (API only returns 1 vehicle's data per multi-vehicle request)
   const FLEET_CONCURRENCY = 3;       // parallel API calls (keep low to avoid 503 rate limit)
   const FLEET_DATA_LOOKBACK_HOURS = 1;
   const FLEET_GPS_LOOKBACK_HOURS = 1;
+  const FLEET_ONLINE_THRESHOLD_MS = FLEET_DATA_LOOKBACK_HOURS * 3600000; // lastContact within lookback = online
 
   async function openFleetOverview(options = {}) {
     const { deferScreen = false, forceReload = false } = options;
@@ -764,13 +766,41 @@
     return true;
   }
 
+  // Determine which trucks are "online" (lastContact within lookback window)
+  function getOnlineTrucks() {
+    const cutoff = Date.now() - FLEET_ONLINE_THRESHOLD_MS;
+    return state.fleetVehicles.filter(t => {
+      const d = parseTyreSenseDate(t.lastContact);
+      return d && d.getTime() > cutoff;
+    });
+  }
+
+  // Determine which trucks are "hot" (≥80°C on any wheel)
+  function getHotTrucks() {
+    return state.fleetVehicles.filter(t => {
+      const status = getTruckStatus(t.vehicleId);
+      return status === 'warn' || status === 'critical';
+    });
+  }
+
+  // Full refresh: vehicle list + online trucks wheeldata + GPS
   async function refreshFleetOverview() {
     if (state.fleetVehicles.length === 0) return;
     dom.fleetTable.classList.add('loading');
     try {
+      // Always refresh vehicle list (1 request) to get fresh lastContact & online count
+      const area = state.selectedArea || state.areas[0];
+      if (area) {
+        const vehicles = await apiGet(`/da/vehicles/area/${area.areaId}`);
+        state.vehicles = vehicles;
+        state.fleetVehicles = vehicles.filter(v => v.type === 'haultruck');
+      }
+      // Only fetch data for online trucks
+      const onlineTrucks = getOnlineTrucks();
+      console.log(`Fleet refresh: ${onlineTrucks.length} online / ${state.fleetVehicles.length} total`);
       await Promise.all([
-        fetchFleetData(),
-        fetchFleetGpsData()
+        fetchFleetData(onlineTrucks),
+        fetchFleetGpsData(onlineTrucks)
       ]);
     } catch (err) {
       toast('Fleet data refresh failed: ' + err.message, 'warning');
@@ -779,8 +809,21 @@
     renderFleetGrid();
   }
 
-  async function fetchFleetData() {
-    const trucks = state.fleetVehicles;
+  // Fast refresh: only hot trucks (≥80°C), no vehicle list, no GPS
+  async function refreshHotTrucks() {
+    const hotTrucks = getHotTrucks();
+    if (hotTrucks.length === 0) return;
+    console.log(`Hot refresh: ${hotTrucks.length} truck(s) ≥80°C`);
+    try {
+      await fetchFleetData(hotTrucks);
+    } catch (err) {
+      console.warn('Hot truck refresh failed:', err.message);
+    }
+    renderFleetGrid();
+  }
+
+  async function fetchFleetData(trucks) {
+    if (!trucks) trucks = getOnlineTrucks();
     if (trucks.length === 0) return;
 
     const now = new Date();
@@ -845,10 +888,11 @@
     state.fleetLastUpdate = new Date();
   }
 
-  async function fetchFleetGpsData() {
-    if (!state.fleetMap || state.fleetVehicles.length === 0) return;
+  async function fetchFleetGpsData(trucks) {
+    if (!trucks) trucks = getOnlineTrucks();
+    if (!state.fleetMap || trucks.length === 0) return;
 
-    const vehicleIds = state.fleetVehicles.map(t => t.vehicleId);
+    const vehicleIds = trucks.map(t => t.vehicleId);
     const now = new Date();
     const hourAgo = new Date(now.getTime() - FLEET_GPS_LOOKBACK_HOURS * 3600000);
     const qs = `startTime=${encodeURIComponent(hourAgo.toISOString())}&endTime=${encodeURIComponent(now.toISOString())}&vehicleValues=GpsPosition`;
@@ -950,7 +994,8 @@
       const model = parts.length > 1 ? parts.slice(1).join(' ') : '';
 
       // Compute data age
-      const ageStr = getDataAge(data.lastSampleTime || truck.lastContact);
+      // Use lastContact from vehicle (controller heartbeat) for age — more accurate than wheeldata start times
+      const ageStr = getDataAge(truck.lastContact);
 
       // ── Single Row: Temperature (T) ──
       const row = document.createElement('tr');
@@ -1113,13 +1158,31 @@
   function startFleetAutoRefresh() {
     stopFleetAutoRefresh();
     state.fleetCountdown = FLEET_REFRESH_INTERVAL;
+    state.hotCountdown = FLEET_HOT_REFRESH_INTERVAL;
     dom.fleetCountdown.textContent = state.fleetCountdown + 's';
 
     state.fleetCountdownTimer = setInterval(() => {
       state.fleetCountdown--;
-      dom.fleetCountdown.textContent = state.fleetCountdown + 's';
+      state.hotCountdown--;
+
+      // Display: show hot countdown if there are hot trucks, otherwise normal countdown
+      const hasHot = getHotTrucks().length > 0;
+      if (hasHot && state.fleetCountdown > FLEET_HOT_REFRESH_INTERVAL) {
+        dom.fleetCountdown.textContent = state.hotCountdown + 's 🔥';
+      } else {
+        dom.fleetCountdown.textContent = state.fleetCountdown + 's';
+      }
+
+      // Hot truck fast refresh (every 60s)
+      if (state.hotCountdown <= 0 && state.fleetCountdown > 5) {
+        state.hotCountdown = FLEET_HOT_REFRESH_INTERVAL;
+        refreshHotTrucks().catch(() => {});
+      }
+
+      // Full refresh (every 180s)
       if (state.fleetCountdown <= 0) {
         state.fleetCountdown = FLEET_REFRESH_INTERVAL;
+        state.hotCountdown = FLEET_HOT_REFRESH_INTERVAL;
         refreshFleetOverview().catch(() => {});
       }
     }, 1000);
