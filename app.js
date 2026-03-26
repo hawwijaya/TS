@@ -48,7 +48,8 @@
     fleetCountdownTimer: null,
     fleetLastUpdate: null,
     fleetMap: null,       // Leaflet map instance
-    fleetMarkers: []      // Leaflet marker references
+    fleetMarkers: [],     // Leaflet marker references
+    fleetGps: {}          // vehicleId -> { lat, lng }
   };
 
   // ---- DOM References ----
@@ -308,7 +309,7 @@
       hideDemoBanner();
       setConnected('Live API');
       if (isReconnect) {
-        await openFleetOverview({ deferScreen: true, forceReload: true });
+        await openFleetOverview({ forceReload: true });
         toast('Fleet overview refreshed', 'success');
       } else {
         toast('Connected to TyreSense API!', 'success');
@@ -837,16 +838,14 @@
 
   const FLEET_REFRESH_INTERVAL = 60; // seconds
   const FLEET_BATCH_SIZE = 10;       // trucks per API call
-  const FLEET_CONCURRENCY = 4;       // parallel API calls
+  const FLEET_CONCURRENCY = 6;       // parallel API calls
+  const FLEET_DATA_LOOKBACK_HOURS = 24;
+  const FLEET_GPS_LOOKBACK_HOURS = 24;
 
   async function openFleetOverview(options = {}) {
     const { deferScreen = false, forceReload = false } = options;
-    if (forceReload) {
-      state.fleetVehicles = [];
-    }
-
     // Load vehicles for Roy Hill Mine (areaId 32) if not already loaded
-    if (state.fleetVehicles.length === 0) {
+    if (forceReload || state.fleetVehicles.length === 0) {
       if (!deferScreen) showLoading('Loading fleet vehicles...');
       try {
         const area = state.areas.find(a => a.areaId === 32) || state.areas[0];
@@ -876,22 +875,30 @@
     }
     dom.fleetCount.textContent = state.fleetVehicles.length + ' haul trucks';
     initFleetMap();
-    await fetchFleetData();
+    await refreshFleetOverview();
     startFleetAutoRefresh();
     if (deferScreen) {
       showScreen(dom.fleetScreen);
     }
   }
 
+  async function refreshFleetOverview() {
+    if (state.fleetVehicles.length === 0) return;
+    dom.fleetTable.classList.add('loading');
+    await Promise.all([
+      fetchFleetData(),
+      fetchFleetGpsData()
+    ]);
+    dom.fleetTable.classList.remove('loading');
+    renderFleetGrid();
+  }
+
   async function fetchFleetData() {
     const trucks = state.fleetVehicles;
     if (trucks.length === 0) return;
 
-    // Show loading shimmer on table
-    dom.fleetTable.classList.add('loading');
-
     const now = new Date();
-    const hourAgo = new Date(now.getTime() - 8 * 3600000); // 8h window to catch all active trucks
+    const hourAgo = new Date(now.getTime() - FLEET_DATA_LOOKBACK_HOURS * 3600000);
     const endT = now.toISOString();
     const startT = hourAgo.toISOString();
 
@@ -906,22 +913,21 @@
       batchIds.push(batch.map(t => t.vehicleId).join(','));
     }
 
-    // For each value type, fetch all batches
-    const allResults = [];
-    for (const vt of valueTypes) {
+    const requests = [];
+    valueTypes.forEach(vt => {
       const qs = `startTime=${encodeURIComponent(startT)}&endTime=${encodeURIComponent(endT)}&wheelValues=${encodeURIComponent(vt)}`;
-      for (let i = 0; i < batchIds.length; i += FLEET_CONCURRENCY) {
-        const chunk = batchIds.slice(i, i + FLEET_CONCURRENCY);
-        const results = await Promise.allSettled(
-          chunk.map(ids => apiGet(`/da/wheeldata/${ids}?${qs}`))
-        );
-        results.forEach(r => {
-          if (r.status === 'fulfilled' && Array.isArray(r.value)) {
-            allResults.push(...r.value);
-          }
-        });
+      batchIds.forEach(ids => {
+        requests.push(() => apiGet(`/da/wheeldata/${ids}?${qs}`));
+      });
+    });
+
+    const settled = await runRequestPool(requests, FLEET_CONCURRENCY);
+    const allResults = [];
+    settled.forEach(r => {
+      if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+        allResults.push(...r.value);
       }
-    }
+    });
 
     // Process results into per-vehicle data
     const fleetData = {};
@@ -962,8 +968,58 @@
 
     state.fleetData = fleetData;
     state.fleetLastUpdate = new Date();
-    dom.fleetTable.classList.remove('loading');
-    renderFleetGrid();
+  }
+
+  async function fetchFleetGpsData() {
+    if (!state.fleetMap || state.fleetVehicles.length === 0) return;
+
+    const vehicleIds = state.fleetVehicles.map(t => t.vehicleId);
+    const now = new Date();
+    const hourAgo = new Date(now.getTime() - FLEET_GPS_LOOKBACK_HOURS * 3600000);
+    const qs = `startTime=${encodeURIComponent(hourAgo.toISOString())}&endTime=${encodeURIComponent(now.toISOString())}&vehicleValues=GpsPosition`;
+
+    const batches = [];
+    for (let i = 0; i < vehicleIds.length; i += FLEET_BATCH_SIZE) {
+      batches.push(vehicleIds.slice(i, i + FLEET_BATCH_SIZE).join(','));
+    }
+
+    const results = await runRequestPool(
+      batches.map(ids => () => apiGet(`/da/vehicledata/${ids}?${qs}`)),
+      FLEET_CONCURRENCY
+    );
+
+    const gpsPoints = {};
+    results.forEach(r => {
+      if (r.status !== 'fulfilled' || !Array.isArray(r.value)) return;
+      r.value.forEach(item => {
+        if (item.valueType !== 'GpsPosition') return;
+        const vals = item.values;
+        if (!vals || vals.length === 0) return;
+        const lastGps = vals[vals.length - 1].value;
+        if (!lastGps) return;
+
+        let lat, lng;
+        try {
+          if (typeof lastGps === 'string') {
+            const parts = lastGps.trim().split(/[\s,]+/);
+            if (parts.length >= 2) {
+              lat = parseFloat(parts[0]);
+              lng = parseFloat(parts[1]);
+            }
+          } else if (typeof lastGps === 'object') {
+            lat = parseFloat(lastGps.latitude || lastGps.lat);
+            lng = parseFloat(lastGps.longitude || lastGps.lng || lastGps.lon);
+          }
+        } catch (_) {
+          return;
+        }
+
+        if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return;
+        gpsPoints[item.vehicleId] = { lat, lng };
+      });
+    });
+
+    state.fleetGps = gpsPoints;
   }
 
   function alertSeverity(level) {
@@ -1151,7 +1207,7 @@
     renderFleetAlerts(alerts);
 
     // Update map markers
-    updateFleetMap();
+    renderFleetMap();
   }
 
   function getDataAge(lastContact) {
@@ -1227,107 +1283,50 @@
     setTimeout(() => { state.fleetMap.invalidateSize(); }, 200);
   }
 
-  function updateFleetMap() {
+  function renderFleetMap() {
     if (!state.fleetMap) return;
 
     // Clear old markers
     state.fleetMarkers.forEach(m => m.remove());
     state.fleetMarkers = [];
+    const bounds = [];
+    Object.entries(state.fleetGps).forEach(([vehicleId, point]) => {
+      const vid = Number(vehicleId);
+      const truck = state.fleetVehicles.find(t => t.vehicleId === vid);
+      if (!truck || !point) return;
 
-    // We need GPS positions — fetch them for active vehicles
-    const activeVids = state.fleetVehicles
-      .filter(t => getTruckStatus(t.vehicleId) !== 'offline')
-      .map(t => t.vehicleId);
+      const status = getTruckStatus(vid);
+      const truckName = truck.name.trim().split(/\s+/)[0];
 
-    if (activeVids.length === 0) return;
-
-    // Fetch GPS in batches
-    const now = new Date();
-    const hourAgo = new Date(now.getTime() - 8 * 3600000);
-    const qs = `startTime=${encodeURIComponent(hourAgo.toISOString())}&endTime=${encodeURIComponent(now.toISOString())}&vehicleValues=GpsPosition`;
-
-    const batches = [];
-    for (let i = 0; i < activeVids.length; i += FLEET_BATCH_SIZE) {
-      batches.push(activeVids.slice(i, i + FLEET_BATCH_SIZE).join(','));
-    }
-
-    (async () => {
-      const gpsResults = [];
-      for (let i = 0; i < batches.length; i += FLEET_CONCURRENCY) {
-        const chunk = batches.slice(i, i + FLEET_CONCURRENCY);
-        const results = await Promise.allSettled(
-          chunk.map(ids => apiGet(`/da/vehicledata/${ids}?${qs}`))
-        );
-        results.forEach(r => {
-          if (r.status === 'fulfilled' && Array.isArray(r.value)) {
-            gpsResults.push(...r.value);
-          }
-        });
-      }
-
-      // Parse GPS data and place markers
-      const bounds = [];
-      gpsResults.forEach(item => {
-        if (item.valueType !== 'GpsPosition') return;
-        const vals = item.values;
-        if (!vals || vals.length === 0) return;
-        const lastGps = vals[vals.length - 1].value;
-        if (!lastGps) return;
-
-        // GPS format: "lat lng alt speed" (space-separated) or "lat,lng"
-        let lat, lng;
-        try {
-          if (typeof lastGps === 'string') {
-            // Try space-separated format first (TyreSense standard: "lat lng alt speed")
-            const parts = lastGps.trim().split(/[\s,]+/);
-            if (parts.length >= 2) {
-              lat = parseFloat(parts[0]);
-              lng = parseFloat(parts[1]);
-            }
-          } else if (typeof lastGps === 'object') {
-            lat = parseFloat(lastGps.latitude || lastGps.lat);
-            lng = parseFloat(lastGps.longitude || lastGps.lng || lastGps.lon);
-          }
-        } catch (e) { return; }
-
-        if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return;
-
-        const truck = state.fleetVehicles.find(t => t.vehicleId === item.vehicleId);
-        if (!truck) return;
-
-        const status = getTruckStatus(item.vehicleId);
-        const truckName = truck.name.trim().split(/\s+/)[0];
-
-        const icon = L.divIcon({
-          className: '',
-          html: `<div class="truck-marker marker-${status}">${escapeHtml(truckName)}</div>`,
-          iconSize: [46, 18],
-          iconAnchor: [23, 9]
-        });
-
-        const marker = L.marker([lat, lng], { icon }).addTo(state.fleetMap);
-
-        const data = state.fleetData[item.vehicleId] || { pressure: {}, temp: {}, alerts: {} };
-        const pressures = Object.values(data.pressure).map(v => v.toFixed(0) + ' PSI').join(', ') || '—';
-        const temps = Object.values(data.temp).map(v => v.toFixed(0) + '°C').join(', ') || '—';
-        const statusLabel = status === 'ok' ? '✅ OK' : status === 'warn' ? '⚠️ Warning' : status === 'critical' ? '🔴 Critical' : '⚪ Offline';
-
-        marker.bindPopup(`
-          <div class="popup-truck-name">${escapeHtml(truck.name)}</div>
-          <div class="popup-status">${statusLabel}</div>
-          <div style="margin-top:4px"><strong>P:</strong> ${pressures}</div>
-          <div><strong>T:</strong> ${temps}</div>
-        `, { maxWidth: 250 });
-
-        marker.on('click', () => drillDown(truck));
-        state.fleetMarkers.push(marker);
-        bounds.push([lat, lng]);
+      const icon = L.divIcon({
+        className: '',
+        html: `<div class="truck-marker marker-${status}">${escapeHtml(truckName)}</div>`,
+        iconSize: [46, 18],
+        iconAnchor: [23, 9]
       });
 
-      if (bounds.length > 0) {
-        state.fleetMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 });
-      }
-    })().catch(() => {});
+      const marker = L.marker([point.lat, point.lng], { icon }).addTo(state.fleetMap);
+
+      const data = state.fleetData[vid] || { pressure: {}, temp: {}, alerts: {} };
+      const pressures = Object.values(data.pressure).map(v => v.toFixed(0) + ' PSI').join(', ') || '—';
+      const temps = Object.values(data.temp).map(v => v.toFixed(0) + '°C').join(', ') || '—';
+      const statusLabel = status === 'ok' ? '✅ OK' : status === 'warn' ? '⚠️ Warning' : status === 'critical' ? '🔴 Critical' : '⚪ Offline';
+
+      marker.bindPopup(`
+        <div class="popup-truck-name">${escapeHtml(truck.name)}</div>
+        <div class="popup-status">${statusLabel}</div>
+        <div style="margin-top:4px"><strong>P:</strong> ${pressures}</div>
+        <div><strong>T:</strong> ${temps}</div>
+      `, { maxWidth: 250 });
+
+      marker.on('click', () => drillDown(truck));
+      state.fleetMarkers.push(marker);
+      bounds.push([point.lat, point.lng]);
+    });
+
+    if (bounds.length > 0) {
+      state.fleetMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 });
+    }
   }
 
   function startFleetAutoRefresh() {
@@ -1340,7 +1339,7 @@
       dom.fleetCountdown.textContent = state.fleetCountdown + 's';
       if (state.fleetCountdown <= 0) {
         state.fleetCountdown = FLEET_REFRESH_INTERVAL;
-        fetchFleetData().catch(() => {});
+        refreshFleetOverview().catch(() => {});
       }
     }, 1000);
   }
@@ -1350,6 +1349,26 @@
       clearInterval(state.fleetCountdownTimer);
       state.fleetCountdownTimer = null;
     }
+  }
+
+  async function runRequestPool(tasks, concurrency) {
+    const results = new Array(tasks.length);
+    let nextIndex = 0;
+
+    async function worker() {
+      while (nextIndex < tasks.length) {
+        const currentIndex = nextIndex++;
+        try {
+          results[currentIndex] = { status: 'fulfilled', value: await tasks[currentIndex]() };
+        } catch (error) {
+          results[currentIndex] = { status: 'rejected', reason: error };
+        }
+      }
+    }
+
+    const workerCount = Math.min(concurrency, tasks.length);
+    await Promise.all(Array.from({ length: workerCount }, worker));
+    return results;
   }
 
   // ---- Escape HTML ----
@@ -1446,7 +1465,7 @@
 
   // Fleet event listeners
   dom.fleetBtn.addEventListener('click', openFleetOverview);
-  dom.fleetRefreshBtn.addEventListener('click', () => fetchFleetData());
+  dom.fleetRefreshBtn.addEventListener('click', () => refreshFleetOverview());
   dom.fleetSort.addEventListener('change', () => renderFleetGrid());
 
   // Initialize default dates

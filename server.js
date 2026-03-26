@@ -27,6 +27,20 @@ const CORS_HEADERS = {
   'access-control-allow-methods': 'GET, POST, OPTIONS'
 };
 
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 24,
+  maxFreeSockets: 8,
+  timeout: 30000
+});
+
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 24,
+  maxFreeSockets: 8,
+  timeout: 30000
+});
+
 // Proxy an API request, trying HTTPS first, then HTTP fallback
 function proxyRequest(targetHost, targetPath, reqHeaders, res) {
   const headers = { ...reqHeaders, host: targetHost };
@@ -63,6 +77,7 @@ function proxyRequest(targetHost, targetPath, reqHeaders, res) {
       path: targetPath,
       method: 'GET',
       headers,
+      agent: httpsAgent,
       rejectUnauthorized: false,
       timeout: 12000
     };
@@ -87,6 +102,7 @@ function proxyRequest(targetHost, targetPath, reqHeaders, res) {
       path: targetPath,
       method: 'GET',
       headers,
+      agent: httpAgent,
       timeout: 10000
     };
     const proxy = http.request(opts, (apiRes) => {
