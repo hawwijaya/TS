@@ -39,7 +39,7 @@
     charts: {},
     _demoVehicles: {},
     // Fleet overview state
-    fleetData: {},       // vehicleId -> { temp: {pos: val}, prevTemp: {pos: val}, history: {pos: values[]}, lastSampleTime: isoString|null }
+    fleetData: {},       // vehicleId -> { temp: {pos: val}, prevTemp: {pos: val}, lastSampleTime }
     fleetVehicles: [],   // haul trucks only
     fleetTimer: null,    // auto-refresh interval
     fleetCountdown: 60,  // seconds until next refresh
@@ -47,7 +47,8 @@
     fleetLastUpdate: null,
     fleetMap: null,       // Leaflet map instance
     fleetMarkers: [],     // Leaflet marker references
-    fleetGps: {}          // vehicleId -> { lat, lng }
+    fleetGps: {},         // vehicleId -> { lat, lng }
+    drillDownCache: {}    // vehicleId -> { wheelData, vehicleData } — reuse on re-visit
   };
 
   // ---- DOM References ----
@@ -529,6 +530,11 @@
 
       state.wheelData = groupWheelData(wheelResp);
       state.vehicleData = groupVehicleData(vehResp);
+
+      // Cache drill-down data for this vehicle
+      if (v.vehicleId) {
+        state.drillDownCache[v.vehicleId] = { wheelData: state.wheelData, vehicleData: state.vehicleData };
+      }
 
       renderDashboard();
       dom.noDataMessage.style.display = 'none';
@@ -1121,7 +1127,17 @@
     updateVehicleInfo(truck);
     setDefaultDateRange();
 
-    fetchVehicleData();
+    // Reuse cached drill-down data if available for this truck
+    const cached = state.drillDownCache[truck.vehicleId];
+    if (cached) {
+      state.wheelData = cached.wheelData;
+      state.vehicleData = cached.vehicleData;
+      renderDashboard();
+      dom.noDataMessage.style.display = 'none';
+      toast(`Showing cached data for ${truck.name} — click Fetch Data to refresh`, 'info');
+    } else {
+      fetchVehicleData();
+    }
   }
 
   // ===================================================================
