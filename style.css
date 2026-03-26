@@ -1245,6 +1245,11 @@ body.demo-active #main-content {
   50% { background: transparent; color: #ff4444; }
 }
 
+/* Trend arrows next to temperature values */
+.trend-up { color: #ff4444; font-size: 0.6rem; vertical-align: middle; }
+.trend-down { color: #34d399; font-size: 0.6rem; vertical-align: middle; }
+.trend-flat { color: #5a6f82; font-size: 0.45rem; vertical-align: middle; }
+
 /* Alert indicator icons on C row */
 .ft-alert-icon {
   display: inline-flex;

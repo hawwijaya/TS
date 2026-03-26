@@ -43,6 +43,9 @@
 | 31 | Smart refresh: only query online trucks, 3-min full cycle, 1-min hot-truck cycle | ✅ Done | 2026-03-26 |
 | 32 | API audit vs Swagger spec: documented bugs, rate limit strategy, unused endpoints | ✅ Done | 2026-03-26 |
 | 33 | Temperature sort fix: sort by actual max °C descending (was bucket-then-name) | ✅ Done | 2026-03-26 |
+| 34 | Reuse fleet data for instant drill-down chart (cached tempHistory, background 24h fetch) | ✅ Done | 2026-03-26 |
+| 35 | Trend arrows in fleet grid: ▲ rising, ▼ falling, ▶ stable (±2°C threshold) | ✅ Done | 2026-03-26 |
+| 36 | Hot/critical truck markers render on top of map (Leaflet zIndexOffset) | ✅ Done | 2026-03-26 |
 
 ## Architecture Decisions
 
