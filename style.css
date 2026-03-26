@@ -607,7 +607,12 @@ tr:hover td {
 
 .wheel-card.ok { border-color: var(--success); }
 .wheel-card.warn { border-color: var(--warning); }
-.wheel-card.critical { border-color: var(--danger); }
+.wheel-card.critical { border-color: var(--danger); animation: flashBorder 0.6s ease-in-out infinite; }
+
+@keyframes flashBorder {
+  0%, 100% { border-color: var(--danger); background: rgba(255, 68, 68, 0.15); }
+  50% { border-color: transparent; background: transparent; }
+}
 
 .wheel-position-number {
   font-size: 1.2em;
@@ -868,7 +873,7 @@ body.demo-active #main-content {
   margin: 2px 0;
 }
 .wheel-card.warn { border-color: var(--warning); }
-.wheel-card.critical { border-color: var(--danger); }
+.wheel-card.critical { border-color: var(--danger); animation: flashBorder 0.6s ease-in-out infinite; }
 
 .wheel-position-number {
   font-size: 1.6rem;
@@ -1232,6 +1237,12 @@ body.demo-active #main-content {
   border-radius: 3px;
   padding: 1px 6px;
   font-weight: 800;
+  animation: flashRed 0.6s ease-in-out infinite;
+}
+
+@keyframes flashRed {
+  0%, 100% { background: var(--danger); }
+  50% { background: transparent; color: #ff4444; }
 }
 
 /* Alert indicator icons on C row */

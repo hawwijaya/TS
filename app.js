@@ -1,5 +1,5 @@
 // =====================================================
-// TyreSense Dashboard — app.js
+// HotTyre Sense Dashboard — app.js
 // =====================================================
 
 (function () {
@@ -12,9 +12,7 @@
   const SETTINGS_KEY = 'tyresense-settings';
 
   const WHEEL_VALUE_TYPES = [
-    'MinGaugePressure', 'MaxGaugePressure', 'Temperature', 'ColdPressure',
-    'MaxPressureAlertStatus', 'MinPressureAlertStatus', 'MaxTemperatureAlertStatus',
-    'SensorId', 'SensorVoltage', 'SensorLowBattery'
+    'Temperature'
   ];
 
   const VEHICLE_VALUE_TYPES = ['Connected', 'GpsPosition', 'Power', 'Ignition'];
@@ -41,7 +39,7 @@
     charts: {},
     _demoVehicles: {},
     // Fleet overview state
-    fleetData: {},       // vehicleId -> { pressure: {pos: val}, temp: {pos: val}, cold: {pos: val}, alerts: {pos: level}, lastSampleTime: isoString|null }
+    fleetData: {},       // vehicleId -> { temp: {pos: val}, lastSampleTime: isoString|null }
     fleetVehicles: [],   // haul trucks only
     fleetTimer: null,    // auto-refresh interval
     fleetCountdown: 60,  // seconds until next refresh
@@ -85,8 +83,7 @@
     endTime: $('#end-time'),
     fetchDataBtn: $('#btn-fetch-data'),
     vehicleStatusRow: $('#vehicle-status-row'),
-    alertSection: $('#alert-section'),
-    alertTableBody: $('#alert-table-body'),
+
     wheelVisualSection: $('#wheel-visual-section'),
     wheelVisual: $('#wheel-visual'),
     noDataMessage: $('#no-data-message'),
@@ -104,8 +101,7 @@
     fleetStatWarn: $('#fleet-stat-warn'),
     fleetStatCritical: $('#fleet-stat-critical'),
     fleetStatOffline: $('#fleet-stat-offline'),
-    fleetAlertsSection: $('#fleet-alerts-section'),
-    fleetAlertsTbody: $('#fleet-alerts-tbody'),
+
     fleetMapContainer: $('#fleet-map')
   };
 
@@ -318,7 +314,7 @@
   async function connect() {
     const isReconnect = state.liveConnected;
     setConnectBusy(true, isReconnect ? 'Refreshing...' : 'Connecting...');
-    showLoading(isReconnect ? 'Refreshing live fleet data...' : 'Connecting to TyreSense API...');
+    showLoading(isReconnect ? 'Refreshing live fleet data...' : 'Connecting to HotTyre Sense...');
     try {
       const areas = await apiGet('/da/areas');
       state.areas = areas;
@@ -327,10 +323,13 @@
       hideDemoBanner();
       setConnected('Live API');
       if (isReconnect) {
-        await openFleetOverview({ forceReload: true });
-        toast('Fleet overview refreshed', 'success');
+        // Reuse cached vehicle list — skip the heavy /vehicles reload
+        const ok = await openFleetOverview({ forceReload: false });
+        if (ok) toast('Fleet overview refreshed', 'success');
       } else {
-        toast('Connected to TyreSense API!', 'success');
+        toast('Connected to HotTyre Sense!', 'success');
+        // Automatically open fleet overview on first connect
+        await openFleetOverview();
       }
     } catch (err) {
       let detail = err.message || 'Unknown error';
@@ -564,10 +563,7 @@
   // ---- Render full dashboard ----
   function renderDashboard() {
     renderVehicleStatus();
-    renderPressureChart();
     renderTemperatureChart();
-    renderColdPressureChart();
-    renderAlertTable();
     renderWheelVisual();
   }
 
@@ -607,50 +603,6 @@
     }
   }
 
-  // ---- Chart: Tyre Pressure ----
-  function renderPressureChart() {
-    const data = state.wheelData;
-    const minP = data.MinGaugePressure || {};
-    const maxP = data.MaxGaugePressure || {};
-    const positions = [...new Set([...Object.keys(minP), ...Object.keys(maxP)])].sort((a, b) => a - b);
-
-    const datasets = [];
-    positions.forEach((pos, idx) => {
-      const color = CHART_COLORS[idx % CHART_COLORS.length];
-      if (maxP[pos]) {
-        datasets.push({
-          label: `Pos ${pos} Max`,
-          data: maxP[pos].map(v => ({ x: parseTyreSenseDate(v.start), y: parseFloat(v.value) })),
-          borderColor: color,
-          backgroundColor: color + '22',
-          borderWidth: 1.5,
-          pointRadius: 0,
-          tension: 0.3,
-          fill: false
-        });
-      }
-      if (minP[pos]) {
-        datasets.push({
-          label: `Pos ${pos} Min`,
-          data: minP[pos].map(v => ({ x: parseTyreSenseDate(v.start), y: parseFloat(v.value) })),
-          borderColor: color,
-          backgroundColor: color + '22',
-          borderWidth: 1.5,
-          borderDash: [4, 3],
-          pointRadius: 0,
-          tension: 0.3,
-          fill: false
-        });
-      }
-    });
-
-    createOrUpdateChart('chart-pressure', 'pressure', {
-      type: 'line',
-      data: { datasets },
-      options: chartOptions('PSI')
-    });
-  }
-
   // ---- Chart: Temperature ----
   function renderTemperatureChart() {
     const temp = state.wheelData.Temperature || {};
@@ -670,28 +622,6 @@
       type: 'line',
       data: { datasets },
       options: chartOptions('°C')
-    });
-  }
-
-  // ---- Chart: Cold Pressure ----
-  function renderColdPressureChart() {
-    const cp = state.wheelData.ColdPressure || {};
-    const positions = Object.keys(cp).sort((a, b) => a - b);
-
-    const datasets = positions.map((pos, idx) => ({
-      label: `Position ${pos}`,
-      data: cp[pos].map(v => ({ x: parseTyreSenseDate(v.start), y: parseFloat(v.value) })),
-      borderColor: CHART_COLORS[idx % CHART_COLORS.length],
-      borderWidth: 1.5,
-      pointRadius: 0,
-      tension: 0.3,
-      fill: false
-    }));
-
-    createOrUpdateChart('chart-cold-pressure', 'coldPressure', {
-      type: 'line',
-      data: { datasets },
-      options: chartOptions('PSI')
     });
   }
 
@@ -739,76 +669,13 @@
     state.charts[key] = new Chart(ctx, config);
   }
 
-  // ---- Alert Table ----
-  function renderAlertTable() {
-    const wd = state.wheelData;
-    const maxPA = wd.MaxPressureAlertStatus || {};
-    const minPA = wd.MinPressureAlertStatus || {};
-    const maxTA = wd.MaxTemperatureAlertStatus || {};
-    const sensorId = wd.SensorId || {};
-    const sensorV = wd.SensorVoltage || {};
-    const sensorBat = wd.SensorLowBattery || {};
-
-    const allPositions = new Set();
-    [maxPA, minPA, maxTA, sensorId, sensorV, sensorBat].forEach(obj => {
-      Object.keys(obj).forEach(p => allPositions.add(p));
-    });
-
-    const positions = [...allPositions].sort((a, b) => a - b);
-
-    if (positions.length === 0) {
-      dom.alertSection.style.display = 'none';
-      return;
-    }
-
-    dom.alertSection.style.display = 'block';
-    dom.alertTableBody.innerHTML = '';
-
-    positions.forEach(pos => {
-      const row = document.createElement('tr');
-
-      const lastVal = (arr) => arr && arr.length > 0 ? arr[arr.length - 1].value : '—';
-      const alertClass = (val) => {
-        if (!val || val === '—' || val === 'None') return 'alert-none';
-        if (val === 'Level1') return 'alert-level1';
-        if (val === 'Level2') return 'alert-level2';
-        return '';
-      };
-
-      const maxPVal = lastVal(maxPA[pos]);
-      const minPVal = lastVal(minPA[pos]);
-      const maxTVal = lastVal(maxTA[pos]);
-      const sIdVal = lastVal(sensorId[pos]);
-      const sVVal = lastVal(sensorV[pos]);
-      const sBatVal = lastVal(sensorBat[pos]);
-
-      row.innerHTML = `
-        <td><strong>Pos ${pos}</strong></td>
-        <td class="${alertClass(maxPVal)}">${escapeHtml(maxPVal)}</td>
-        <td class="${alertClass(minPVal)}">${escapeHtml(minPVal)}</td>
-        <td class="${alertClass(maxTVal)}">${escapeHtml(maxTVal)}</td>
-        <td>${escapeHtml(sIdVal)}</td>
-        <td>${escapeHtml(sVVal)}${sVVal !== '—' ? 'V' : ''}</td>
-        <td>${sBatVal === 'true' || sBatVal === 'True' ? '⚠️ Low' : sBatVal === '—' ? '—' : '✅ OK'}</td>
-      `;
-      dom.alertTableBody.appendChild(row);
-    });
-  }
-
   // ---- Wheel Visual ----
   function renderWheelVisual() {
     const wd = state.wheelData;
-    const maxP = wd.MaxGaugePressure || {};
     const temp = wd.Temperature || {};
-    const maxPA = wd.MaxPressureAlertStatus || {};
-    const minPA = wd.MinPressureAlertStatus || {};
-    const maxTA = wd.MaxTemperatureAlertStatus || {};
-    const cp = wd.ColdPressure || {};
 
     const allPositions = new Set();
-    [maxP, temp, maxPA, minPA, maxTA, cp].forEach(obj => {
-      Object.keys(obj).forEach(p => allPositions.add(p));
-    });
+    Object.keys(temp).forEach(p => allPositions.add(p));
 
     const positions = [...allPositions].sort((a, b) => a - b);
 
@@ -826,25 +693,17 @@
 
       const lastVal = (arr) => arr && arr.length > 0 ? arr[arr.length - 1].value : null;
 
-      const pressure = lastVal(maxP[pos]);
       const temperature = lastVal(temp[pos]);
-      const coldP = lastVal(cp[pos]);
-      const alertCandidates = [lastVal(maxPA[pos]), lastVal(minPA[pos]), lastVal(maxTA[pos])].filter(Boolean);
-      const alert = alertCandidates.reduce((worst, current) => {
-        return alertSeverity(current) > alertSeverity(worst) ? current : worst;
-      }, 'None');
+      const tempNum = temperature !== null ? parseFloat(temperature) : null;
 
-      // Determine status
-      if (alert === 'Level2') card.classList.add('critical');
-      else if (alert === 'Level1') card.classList.add('warn');
+      // Determine status based on temperature
+      if (tempNum !== null && tempNum >= 85) card.classList.add('critical');
+      else if (tempNum !== null && tempNum >= 80) card.classList.add('warn');
       else card.classList.add('ok');
 
       card.innerHTML = `
         <div class="wheel-position-number">P${pos}</div>
-        <div class="wheel-stat"><span>Pressure</span> <span class="val">${pressure !== null ? parseFloat(pressure).toFixed(1) + ' PSI' : '—'}</span></div>
-        <div class="wheel-stat"><span>Temp</span> <span class="val">${temperature !== null ? parseFloat(temperature).toFixed(1) + ' °C' : '—'}</span></div>
-        <div class="wheel-stat"><span>Cold PSI</span> <span class="val">${coldP !== null ? parseFloat(coldP).toFixed(1) : '—'}</span></div>
-        <div class="wheel-stat"><span>Alert</span> <span class="val ${alert === 'Level2' ? 'alert-level2' : alert === 'Level1' ? 'alert-level1' : 'alert-none'}">${alert || 'None'}</span></div>
+        <div class="wheel-stat"><span>Temp</span> <span class="val">${tempNum !== null ? tempNum.toFixed(1) + ' °C' : '—'}</span></div>
       `;
       dom.wheelVisual.appendChild(card);
     });
@@ -855,10 +714,10 @@
   // ===================================================================
 
   const FLEET_REFRESH_INTERVAL = 60; // seconds
-  const FLEET_BATCH_SIZE = 10;       // trucks per API call
-  const FLEET_CONCURRENCY = 6;       // parallel API calls
-  const FLEET_DATA_LOOKBACK_HOURS = 24;
-  const FLEET_GPS_LOOKBACK_HOURS = 24;
+  const FLEET_BATCH_SIZE = 1;        // 1 truck per API call (API only returns 1 vehicle's data per multi-vehicle request)
+  const FLEET_CONCURRENCY = 3;       // parallel API calls (keep low to avoid 503 rate limit)
+  const FLEET_DATA_LOOKBACK_HOURS = 1;
+  const FLEET_GPS_LOOKBACK_HOURS = 1;
 
   async function openFleetOverview(options = {}) {
     const { deferScreen = false, forceReload = false } = options;
@@ -870,7 +729,7 @@
         if (!area) {
           toast('No area found', 'error');
           if (!deferScreen) hideLoading();
-          return;
+          return false;
         }
         state.selectedArea = area;
         const vehicles = await apiGet(`/da/vehicles/area/${area.areaId}`);
@@ -881,32 +740,41 @@
         dom.sectionAreas.style.display = 'block';
         dom.sectionVehicles.style.display = 'block';
       } catch (err) {
-        toast('Failed to load vehicles: ' + err.message, 'error');
-        if (!deferScreen) hideLoading();
-        return;
+        // If we have cached vehicles, show fleet with stale data instead of failing
+        if (state.fleetVehicles.length > 0) {
+          toast('Using cached fleet data — live refresh unavailable (' + err.message + ')', 'warning');
+          if (!deferScreen) hideLoading();
+        } else {
+          toast('Failed to load vehicles: ' + err.message, 'error');
+          if (!deferScreen) hideLoading();
+          return false;
+        }
       }
       if (!deferScreen) hideLoading();
     }
 
-    if (!deferScreen) {
-      showScreen(dom.fleetScreen);
-    }
+    // Show fleet screen immediately with whatever data we have
+    showScreen(dom.fleetScreen);
     dom.fleetCount.textContent = state.fleetVehicles.length + ' haul trucks';
     initFleetMap();
+    renderFleetGrid();
+    // Then refresh heavy wheel data + GPS in background
     await refreshFleetOverview();
     startFleetAutoRefresh();
-    if (deferScreen) {
-      showScreen(dom.fleetScreen);
-    }
+    return true;
   }
 
   async function refreshFleetOverview() {
     if (state.fleetVehicles.length === 0) return;
     dom.fleetTable.classList.add('loading');
-    await Promise.all([
-      fetchFleetData(),
-      fetchFleetGpsData()
-    ]);
+    try {
+      await Promise.all([
+        fetchFleetData(),
+        fetchFleetGpsData()
+      ]);
+    } catch (err) {
+      toast('Fleet data refresh failed: ' + err.message, 'warning');
+    }
     dom.fleetTable.classList.remove('loading');
     renderFleetGrid();
   }
@@ -922,7 +790,7 @@
 
     // IMPORTANT: The TyreSense API only returns data for the FIRST wheelValues
     // parameter per request, so we must make separate calls per value type.
-    const valueTypes = ['MinGaugePressure', 'Temperature', 'ColdPressure', 'MaxPressureAlertStatus', 'MinPressureAlertStatus', 'MaxTemperatureAlertStatus'];
+    const valueTypes = ['Temperature'];
 
     // Split trucks into batches
     const batchIds = [];
@@ -941,17 +809,23 @@
 
     const settled = await runRequestPool(requests, FLEET_CONCURRENCY);
     const allResults = [];
+    let failCount = 0;
     settled.forEach(r => {
       if (r.status === 'fulfilled' && Array.isArray(r.value)) {
         allResults.push(...r.value);
+      } else {
+        failCount++;
       }
     });
+    if (failCount > 0) {
+      console.warn(`Fleet data: ${failCount}/${settled.length} batches failed (likely 503 rate limit)`);
+    }
 
     // Process results into per-vehicle data
     const fleetData = {};
     allResults.forEach(item => {
       const vid = item.vehicleId;
-      if (!fleetData[vid]) fleetData[vid] = { pressure: {}, temp: {}, cold: {}, alerts: {}, lastSampleTime: null };
+      if (!fleetData[vid]) fleetData[vid] = { temp: {}, lastSampleTime: null };
       const lastEntry = item.values && item.values.length > 0 ? item.values[item.values.length - 1] : null;
       const lastVal = lastEntry ? lastEntry.value : null;
       if (lastVal === null) return;
@@ -962,27 +836,8 @@
       if (sampleDate && (!currentDate || sampleDate > currentDate)) {
         fleetData[vid].lastSampleTime = sampleTime;
       }
-      switch (item.valueType) {
-        case 'MinGaugePressure':
-          fleetData[vid].pressure[pos] = parseFloat(lastVal);
-          break;
-        case 'Temperature':
-          fleetData[vid].temp[pos] = parseFloat(lastVal);
-          break;
-        case 'ColdPressure':
-          fleetData[vid].cold[pos] = parseFloat(lastVal);
-          break;
-        case 'MaxPressureAlertStatus':
-        case 'MinPressureAlertStatus':
-        case 'MaxTemperatureAlertStatus': {
-          const current = fleetData[vid].alerts[pos] || 'None';
-          const incoming = lastVal;
-          // Keep the worst alert level
-          if (alertSeverity(incoming) > alertSeverity(current)) {
-            fleetData[vid].alerts[pos] = incoming;
-          }
-          break;
-        }
+      if (item.valueType === 'Temperature') {
+        fleetData[vid].temp[pos] = parseFloat(lastVal);
       }
     });
 
@@ -1042,23 +897,16 @@
     state.fleetGps = gpsPoints;
   }
 
-  function alertSeverity(level) {
-    if (level === 'Level2') return 2;
-    if (level === 'Level1') return 1;
-    return 0;
-  }
-
   function getTruckStatus(vid) {
     const data = state.fleetData[vid];
-    if (!data || (Object.keys(data.pressure).length === 0 && Object.keys(data.temp).length === 0)) {
+    if (!data || Object.keys(data.temp).length === 0) {
       return 'offline';
     }
-    let worst = 0;
-    Object.values(data.alerts).forEach(level => {
-      worst = Math.max(worst, alertSeverity(level));
-    });
-    if (worst >= 2) return 'critical';
-    if (worst >= 1) return 'warn';
+    // Check for high temperature: >=80°C warning, >=85°C critical (flashing)
+    let maxTemp = 0;
+    Object.values(data.temp).forEach(t => { if (t > maxTemp) maxTemp = t; });
+    if (maxTemp >= 85) return 'critical';
+    if (maxTemp >= 80) return 'warn';
     return 'ok';
   }
 
@@ -1087,7 +935,6 @@
   function renderFleetGrid() {
     const trucks = sortFleetVehicles(state.fleetVehicles);
     dom.fleetTbody.innerHTML = '';
-    const alerts = []; // collect active alerts
 
     let counts = { total: trucks.length, ok: 0, warn: 0, critical: 0, offline: 0 };
 
@@ -1095,7 +942,7 @@
       const vid = truck.vehicleId;
       const status = getTruckStatus(vid);
       counts[status]++;
-      const data = state.fleetData[vid] || { pressure: {}, temp: {}, cold: {}, alerts: {}, lastSampleTime: null };
+      const data = state.fleetData[vid] || { temp: {}, lastSampleTime: null };
 
       // Name parts: e.g. "DT034 793F" → id="DT034", model="793F"
       const parts = truck.name.trim().split(/\s+/);
@@ -1105,114 +952,51 @@
       // Compute data age
       const ageStr = getDataAge(data.lastSampleTime || truck.lastContact);
 
-      // Collect active alerts for alert table
-      for (let pos = 1; pos <= 6; pos++) {
-        const al = data.alerts[pos];
-        if (al && al !== 'None') {
-          alerts.push({
-            type: alertSeverity(al) >= 2 ? 'Pressure Alert' : 'Low Pressure Alert',
-            severity: al,
-            vehicle: truck.name,
-            position: pos,
-            psi: data.pressure[pos],
-            temp: data.temp[pos]
-          });
-        }
-      }
+      // ── Single Row: Temperature (T) ──
+      const row = document.createElement('tr');
+      row.className = `ft-row-t truck-${status}`;
+      row.dataset.vehicleId = vid;
 
-      // ── Row 1: Pressure (P) ──
-      const rowP = document.createElement('tr');
-      rowP.className = `ft-row-p truck-${status}`;
-      rowP.dataset.vehicleId = vid;
-
-      // Vehicle name cell (spans 3 rows)
+      // Vehicle name cell
       const cellVehicle = document.createElement('td');
       cellVehicle.className = 'ft-cell-vehicle';
-      cellVehicle.rowSpan = 3;
       cellVehicle.innerHTML = `<div class="ft-truck-name">${escapeHtml(truckId)}</div><div class="ft-truck-model">${escapeHtml(model)}</div>`;
       cellVehicle.style.cursor = 'pointer';
       cellVehicle.addEventListener('click', () => drillDown(truck));
-      rowP.appendChild(cellVehicle);
+      row.appendChild(cellVehicle);
 
-      // Meta cell (spans 3 rows)
+      // Meta cell
       const cellMeta = document.createElement('td');
       cellMeta.className = 'ft-cell-meta';
-      cellMeta.rowSpan = 3;
       const contactTime = truck.lastContact ? formatDate(truck.lastContact) : '—';
       cellMeta.innerHTML = `<span style="font-size:0.68rem;color:var(--text-muted)">${escapeHtml(contactTime)}</span>`;
-      rowP.appendChild(cellMeta);
+      row.appendChild(cellMeta);
 
-      // Type indicator: P
-      const cellTypeP = document.createElement('td');
-      cellTypeP.innerHTML = `<span class="ft-type-indicator ft-type-p">P</span>`;
-      rowP.appendChild(cellTypeP);
-
-      // Pressure values for positions 1-6
-      for (let pos = 1; pos <= 6; pos++) {
-        const td = document.createElement('td');
-        const psi = data.pressure[pos];
-        const alert = data.alerts[pos] || 'None';
-        if (psi != null) {
-          const cls = alertSeverity(alert) >= 2 ? 'val-critical' : alertSeverity(alert) >= 1 ? 'val-warn' : 'val-ok';
-          td.innerHTML = `<span class="ft-val ${cls}">${psi.toFixed(0)}</span>`;
-        } else {
-          td.innerHTML = `<span class="ft-val val-nodata">--</span>`;
-        }
-        rowP.appendChild(td);
-      }
-
-      // Age cell (spans 3 rows)
-      const cellAge = document.createElement('td');
-      cellAge.rowSpan = 3;
-      const ageClass = ageStr === 'offline' ? 'age-offline' : (parseInt(ageStr) > 15 ? 'age-stale' : '');
-      cellAge.innerHTML = `<span class="ft-age-val ${ageClass}">${ageStr}</span>`;
-      rowP.appendChild(cellAge);
-
-      dom.fleetTbody.appendChild(rowP);
-
-      // ── Row 2: Temperature (T) ──
-      const rowT = document.createElement('tr');
-      rowT.className = 'ft-row-t';
-      rowT.dataset.vehicleId = vid;
-
+      // Type indicator: T
       const cellTypeT = document.createElement('td');
       cellTypeT.innerHTML = `<span class="ft-type-indicator ft-type-t">T</span>`;
-      rowT.appendChild(cellTypeT);
+      row.appendChild(cellTypeT);
 
+      // Temperature values for positions 1-6
       for (let pos = 1; pos <= 6; pos++) {
         const td = document.createElement('td');
         const temp = data.temp[pos];
         if (temp != null) {
-          td.innerHTML = `<span class="ft-val val-ok">${temp.toFixed(0)}</span>`;
+          const cls = temp >= 85 ? 'val-critical' : temp >= 80 ? 'val-warn' : 'val-ok';
+          td.innerHTML = `<span class="ft-val ${cls}">${temp.toFixed(0)}°</span>`;
         } else {
           td.innerHTML = `<span class="ft-val val-nodata">--</span>`;
         }
-        rowT.appendChild(td);
+        row.appendChild(td);
       }
-      dom.fleetTbody.appendChild(rowT);
 
-      // ── Row 3: Cold pressure (C) ──
-      const rowC = document.createElement('tr');
-      rowC.className = 'ft-row-c';
-      rowC.dataset.vehicleId = vid;
+      // Age cell
+      const cellAge = document.createElement('td');
+      const ageClass = ageStr === 'offline' ? 'age-offline' : (parseInt(ageStr) > 15 ? 'age-stale' : '');
+      cellAge.innerHTML = `<span class="ft-age-val ${ageClass}">${ageStr}</span>`;
+      row.appendChild(cellAge);
 
-      const cellTypeC = document.createElement('td');
-      cellTypeC.innerHTML = `<span class="ft-type-indicator ft-type-c">C</span>`;
-      rowC.appendChild(cellTypeC);
-
-      for (let pos = 1; pos <= 6; pos++) {
-        const td = document.createElement('td');
-        const cold = data.cold[pos];
-        const alert = data.alerts[pos] || 'None';
-        if (cold != null) {
-          const cls = alertSeverity(alert) >= 2 ? 'val-critical' : alertSeverity(alert) >= 1 ? 'val-warn' : 'val-ok';
-          td.innerHTML = `<span class="ft-val ${cls}">${cold.toFixed(0)}</span>`;
-        } else {
-          td.innerHTML = `<span class="ft-val val-nodata">--</span>`;
-        }
-        rowC.appendChild(td);
-      }
-      dom.fleetTbody.appendChild(rowC);
+      dom.fleetTbody.appendChild(row);
     });
 
     // Update summary stats
@@ -1226,9 +1010,6 @@
     if (state.fleetLastUpdate) {
       dom.fleetLastUpdate.textContent = 'Updated: ' + state.fleetLastUpdate.toLocaleTimeString();
     }
-
-    // Render active alerts table
-    renderFleetAlerts(alerts);
 
     // Update map markers
     renderFleetMap();
@@ -1247,29 +1028,6 @@
     const hrs = Math.floor(mins / 60);
     if (hrs < 24) return hrs + 'h';
     return Math.floor(hrs / 24) + 'd';
-  }
-
-  function renderFleetAlerts(alerts) {
-    if (alerts.length === 0) {
-      dom.fleetAlertsSection.style.display = 'none';
-      return;
-    }
-    dom.fleetAlertsSection.style.display = '';
-    dom.fleetAlertsTbody.innerHTML = '';
-    // Sort: Level2 first, then Level1
-    alerts.sort((a, b) => alertSeverity(b.severity) - alertSeverity(a.severity));
-    alerts.forEach(al => {
-      const tr = document.createElement('tr');
-      const sevClass = al.severity === 'Level2' ? 'sev-critical' : 'sev-warn';
-      const sevLabel = al.severity === 'Level2' ? 'Critical' : 'Warning';
-      tr.innerHTML = `
-        <td>${escapeHtml(al.type)}</td>
-        <td class="${sevClass}">${sevLabel}</td>
-        <td>${escapeHtml(al.vehicle)} / P${al.position}</td>
-        <td>${al.psi != null ? al.psi.toFixed(0) + ' PSI' : '—'}${al.temp != null ? ' / ' + al.temp.toFixed(0) + '°C' : ''}</td>
-      `;
-      dom.fleetAlertsTbody.appendChild(tr);
-    });
   }
 
   function drillDown(truck) {
@@ -1332,16 +1090,14 @@
 
       const marker = L.marker([point.lat, point.lng], { icon }).addTo(state.fleetMap);
 
-      const data = state.fleetData[vid] || { pressure: {}, temp: {}, alerts: {} };
-      const pressures = Object.values(data.pressure).map(v => v.toFixed(0) + ' PSI').join(', ') || '—';
+      const data = state.fleetData[vid] || { temp: {} };
       const temps = Object.values(data.temp).map(v => v.toFixed(0) + '°C').join(', ') || '—';
-      const statusLabel = status === 'ok' ? '✅ OK' : status === 'warn' ? '⚠️ Warning' : status === 'critical' ? '🔴 Critical' : '⚪ Offline';
+      const statusLabel = status === 'ok' ? '✅ OK' : status === 'warn' ? '⚠️ Hot' : status === 'critical' ? '🔴 Overheating' : '⚪ Offline';
 
       marker.bindPopup(`
         <div class="popup-truck-name">${escapeHtml(truck.name)}</div>
         <div class="popup-status">${statusLabel}</div>
-        <div style="margin-top:4px"><strong>P:</strong> ${pressures}</div>
-        <div><strong>T:</strong> ${temps}</div>
+        <div style="margin-top:4px"><strong>Temp:</strong> ${temps}</div>
       `, { maxWidth: 250 });
 
       marker.on('click', () => drillDown(truck));
@@ -1387,6 +1143,10 @@
           results[currentIndex] = { status: 'fulfilled', value: await tasks[currentIndex]() };
         } catch (error) {
           results[currentIndex] = { status: 'rejected', reason: error };
+        }
+        // Small delay between requests to avoid rate limiting
+        if (nextIndex < tasks.length) {
+          await new Promise(r => setTimeout(r, 300));
         }
       }
     }

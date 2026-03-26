@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TyreSense Dashboard</title>
+  <title>HotTyre Sense</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -16,7 +16,7 @@
     <div class="sidebar-header">
       <svg class="logo-icon" viewBox="0 0 24 24" width="28" height="28"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/><line x1="12" y1="2" x2="12" y2="6" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="1.5"/><line x1="2" y1="12" x2="6" y2="12" stroke="currentColor" stroke-width="1.5"/><line x1="18" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="1.5"/></svg>
       <div class="sidebar-header-text">
-        <h1>TyreSense</h1>
+        <h1>HotTyre Sense</h1>
         <div class="sidebar-header-note">Development &amp; Testing Only - kuatrinnus.wijaya@hio.com.au</div>
       </div>
     </div>
@@ -54,7 +54,7 @@
 
   <!-- Simulated Data Banner -->
   <div id="demo-banner" class="demo-banner" style="display:none">
-    ⚠️ SIMULATED DATA — This is sample data for UI preview. Connect to the TyreSense API for real truck tyre data.
+    ⚠️ SIMULATED DATA — This is sample data for UI preview. Connect to the HotTyre Sense API for real truck tyre data.
     <button id="btn-dismiss-banner" class="banner-dismiss">&times;</button>
   </div>
 
@@ -77,18 +77,9 @@
     <div id="welcome-screen" class="screen active">
       <div class="welcome-content">
         <svg viewBox="0 0 24 24" width="80" height="80" class="welcome-icon"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.3"/><circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="3 2"/></svg>
-        <h2>TyreSense Data Explorer</h2>
-        <p>Connect to the TyreSense API to view real-time and historical tyre data for your fleet.</p>
+        <h2>HotTyre Sense</h2>
+        <p>A demo application to explore the TyreSense API for HotTyre fleet temperature management.</p>
         <p class="hint">Click <strong>Connect to API</strong> in the sidebar to get started.</p>
-        <div class="welcome-info">
-          <h4>Connection Requirements</h4>
-          <ul>
-            <li>Network access to the TyreSense server (australia.tyresense.com)</li>
-            <li>Valid JWT API token configured server-side, or pasted in API Settings for local testing</li>
-            <li>Do <strong>not</strong> use VPN — it may block the connection</li>
-            <li>Review API Settings if the connection does not come up cleanly</li>
-          </ul>
-        </div>
       </div>
     </div>
 
@@ -102,7 +93,7 @@
     <div id="fleet-screen" class="screen">
       <div class="fleet-topbar">
         <div class="fleet-topbar-left">
-          <h2>🚛 Fleet Overview</h2>
+          <h2>� Fleet Temperature Overview</h2>
           <span id="fleet-count" class="fleet-count"></span>
         </div>
         <div class="fleet-topbar-right">
@@ -111,7 +102,7 @@
             <span id="fleet-countdown" class="fleet-countdown"></span>
           </div>
           <select id="fleet-sort" class="fleet-sort">
-            <option value="criticality">Sort: Alert State</option>
+            <option value="criticality">Sort: Temperature</option>
             <option value="name">Sort: Name</option>
             <option value="lastcontact">Sort: Last Contact</option>
           </select>
@@ -121,8 +112,8 @@
       <div class="fleet-summary" id="fleet-summary">
         <div class="fleet-stat" id="fleet-stat-total"><span class="fs-num">—</span><span class="fs-label">Total</span></div>
         <div class="fleet-stat ok" id="fleet-stat-ok"><span class="fs-num">—</span><span class="fs-label">OK</span></div>
-        <div class="fleet-stat warn" id="fleet-stat-warn"><span class="fs-num">—</span><span class="fs-label">Warning</span></div>
-        <div class="fleet-stat critical" id="fleet-stat-critical"><span class="fs-num">—</span><span class="fs-label">Critical</span></div>
+        <div class="fleet-stat warn" id="fleet-stat-warn"><span class="fs-num">—</span><span class="fs-label">Hot</span></div>
+        <div class="fleet-stat critical" id="fleet-stat-critical"><span class="fs-num">—</span><span class="fs-label">Overheating</span></div>
         <div class="fleet-stat offline" id="fleet-stat-offline"><span class="fs-num">—</span><span class="fs-label">No Data</span></div>
       </div>
       <div class="fleet-body">
@@ -147,21 +138,7 @@
         </div><!-- end fleet-table-wrap -->
         <div id="fleet-map" class="fleet-map"></div>
       </div><!-- end fleet-body -->
-      <!-- Active Alerts Table -->
-      <div class="fleet-alerts-section" id="fleet-alerts-section" style="display:none">
-        <h3 class="fleet-alerts-title">⚠ Active Alerts</h3>
-        <table class="fleet-alerts-table" id="fleet-alerts-table">
-          <thead>
-            <tr>
-              <th>Alert Type</th>
-              <th>Severity</th>
-              <th>Vehicle / Position</th>
-              <th>Value</th>
-            </tr>
-          </thead>
-          <tbody id="fleet-alerts-tbody"></tbody>
-        </table>
-      </div>
+
     </div>
 
     <!-- Dashboard Screen -->
@@ -228,46 +205,17 @@
 
       <!-- Charts Grid -->
       <div class="charts-grid">
-        <div class="chart-card" id="chart-card-pressure">
-          <h3>Tyre Pressure (PSI)</h3>
-          <div class="chart-container">
-            <canvas id="chart-pressure"></canvas>
-          </div>
-        </div>
+
         <div class="chart-card" id="chart-card-temperature">
           <h3>Tyre Temperature (°C)</h3>
           <div class="chart-container">
             <canvas id="chart-temperature"></canvas>
           </div>
         </div>
-        <div class="chart-card full-width" id="chart-card-cold-pressure">
-          <h3>Cold Inflation Pressure (PSI)</h3>
-          <div class="chart-container">
-            <canvas id="chart-cold-pressure"></canvas>
-          </div>
-        </div>
+
       </div>
 
-      <!-- Alert Status Table -->
-      <div class="table-card" id="alert-section" style="display:none">
-        <h3>Alert Status</h3>
-        <div class="table-wrapper">
-          <table id="alert-table">
-            <thead>
-              <tr>
-                <th>Position</th>
-                <th>Max Pressure Alert</th>
-                <th>Min Pressure Alert</th>
-                <th>Max Temp Alert</th>
-                <th>Sensor ID</th>
-                <th>Sensor Voltage</th>
-                <th>Battery</th>
-              </tr>
-            </thead>
-            <tbody id="alert-table-body"></tbody>
-          </table>
-        </div>
-      </div>
+
 
       <!-- Wheel Position Visual -->
       <div class="table-card" id="wheel-visual-section" style="display:none">
