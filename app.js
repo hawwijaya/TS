@@ -274,9 +274,27 @@
     setTimeout(() => el.remove(), 4000);
   }
 
+  function parseTyreSenseDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value === 'number') return new Date(value);
+
+    let text = String(value).trim();
+    if (!text) return null;
+
+    // TyreSense often returns UTC timestamps without a timezone suffix.
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(text)) {
+      text += 'Z';
+    }
+
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
   function formatDate(isoStr) {
     if (!isoStr) return '—';
-    const d = new Date(isoStr);
+    const d = parseTyreSenseDate(isoStr);
+    if (!d) return '—';
     return d.toLocaleString(undefined, {
       year: 'numeric', month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit'
@@ -602,7 +620,7 @@
       if (maxP[pos]) {
         datasets.push({
           label: `Pos ${pos} Max`,
-          data: maxP[pos].map(v => ({ x: new Date(v.start), y: parseFloat(v.value) })),
+          data: maxP[pos].map(v => ({ x: parseTyreSenseDate(v.start), y: parseFloat(v.value) })),
           borderColor: color,
           backgroundColor: color + '22',
           borderWidth: 1.5,
@@ -614,7 +632,7 @@
       if (minP[pos]) {
         datasets.push({
           label: `Pos ${pos} Min`,
-          data: minP[pos].map(v => ({ x: new Date(v.start), y: parseFloat(v.value) })),
+          data: minP[pos].map(v => ({ x: parseTyreSenseDate(v.start), y: parseFloat(v.value) })),
           borderColor: color,
           backgroundColor: color + '22',
           borderWidth: 1.5,
@@ -640,7 +658,7 @@
 
     const datasets = positions.map((pos, idx) => ({
       label: `Position ${pos}`,
-      data: temp[pos].map(v => ({ x: new Date(v.start), y: parseFloat(v.value) })),
+      data: temp[pos].map(v => ({ x: parseTyreSenseDate(v.start), y: parseFloat(v.value) })),
       borderColor: CHART_COLORS[idx % CHART_COLORS.length],
       borderWidth: 1.5,
       pointRadius: 0,
@@ -662,7 +680,7 @@
 
     const datasets = positions.map((pos, idx) => ({
       label: `Position ${pos}`,
-      data: cp[pos].map(v => ({ x: new Date(v.start), y: parseFloat(v.value) })),
+      data: cp[pos].map(v => ({ x: parseTyreSenseDate(v.start), y: parseFloat(v.value) })),
       borderColor: CHART_COLORS[idx % CHART_COLORS.length],
       borderWidth: 1.5,
       pointRadius: 0,
@@ -939,7 +957,9 @@
       if (lastVal === null) return;
       const pos = item.position;
       const sampleTime = lastEntry && (lastEntry.start || lastEntry.timestamp || lastEntry.time);
-      if (sampleTime && (!fleetData[vid].lastSampleTime || new Date(sampleTime) > new Date(fleetData[vid].lastSampleTime))) {
+      const sampleDate = parseTyreSenseDate(sampleTime);
+      const currentDate = parseTyreSenseDate(fleetData[vid].lastSampleTime);
+      if (sampleDate && (!currentDate || sampleDate > currentDate)) {
         fleetData[vid].lastSampleTime = sampleTime;
       }
       switch (item.valueType) {
@@ -1055,7 +1075,11 @@
     } else if (sortBy === 'name') {
       sorted.sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortBy === 'lastcontact') {
-      sorted.sort((a, b) => new Date(b.lastContact) - new Date(a.lastContact));
+      sorted.sort((a, b) => {
+        const left = parseTyreSenseDate(b.lastContact);
+        const right = parseTyreSenseDate(a.lastContact);
+        return (left ? left.getTime() : 0) - (right ? right.getTime() : 0);
+      });
     }
     return sorted;
   }
@@ -1213,7 +1237,8 @@
   function getDataAge(lastContact) {
     if (!lastContact) return 'offline';
     const now = new Date();
-    const last = new Date(lastContact);
+    const last = parseTyreSenseDate(lastContact);
+    if (!last) return '—';
     const diffMs = now - last;
     if (diffMs < 0 || isNaN(diffMs)) return '—';
     const mins = Math.floor(diffMs / 60000);

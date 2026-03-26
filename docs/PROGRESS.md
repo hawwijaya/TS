@@ -1,7 +1,7 @@
 # TyreSense Dashboard — Project Progress & Status
 
 **Last Updated**: 2026-03-26  
-**Sprint**: v2.2 — Fleet Refresh Visibility And Map Sync  
+**Sprint**: v2.3 — Freshness Timestamp Correction  
 **Server**: `australia.tyresense.com` (Azure, 23.101.230.162)
 
 ---
@@ -31,6 +31,7 @@
 | 19 | Reconnect now transitions visibly into Fleet Overview during refresh | ✅ Done | 2026-03-26 |
 | 20 | Fleet map GPS load synchronised with fleet refresh | ✅ Done | 2026-03-26 |
 | 21 | Proxy keep-alive enabled for heavy fleet refresh traffic | ✅ Done | 2026-03-26 |
+| 22 | TyreSense timezone-less timestamps normalised to UTC for correct age display | ✅ Done | 2026-03-26 |
 
 ## Architecture Decisions
 
@@ -45,6 +46,7 @@
 | Live-only sidebar actions | Reduce operator confusion and remove non-production entry points |
 | Fleet table and map refresh together | Prevent the map from lagging behind the table and looking empty during a completed refresh |
 | Keep-alive upstream proxying | Reduce handshake churn and stabilise multi-request fleet refreshes |
+| Treat timezone-less TyreSense timestamps as UTC | Prevent false 8-hour staleness in AWST and align age with production |
 
 ## API Connectivity Log
 
@@ -78,6 +80,7 @@
 | VPN blocks API connection | Info | Documented — do not use VPN |
 | Proxy fallback could write headers twice under retry load | High | Fixed 2026-03-26 |
 | Fleet refresh still takes noticeable time for a full 95-truck live load | Medium | Improved 2026-03-26; still bounded by upstream API volume |
+| API timestamps omit timezone information | Medium | Fixed in app parsing on 2026-03-26 |
 
 ## File Inventory
 
@@ -98,3 +101,4 @@
 - Reconnect now switches into Fleet Overview with visible refresh/loading feedback and restores live controls when the refresh completes
 - Development/testing banner added below the TyreSense title for local and test environments
 - Fleet map markers are now populated from the same refresh cycle as the fleet table instead of lagging behind on a later async step
+- Fleet age and last-contact values now match live TyreSense freshness because timezone-less API timestamps are normalised correctly
