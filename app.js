@@ -913,22 +913,20 @@
     const hourAgo = new Date(now.getTime() - FLEET_GPS_LOOKBACK_HOURS * 3600000);
     const qs = `startTime=${encodeURIComponent(hourAgo.toISOString())}&endTime=${encodeURIComponent(now.toISOString())}&vehicleValues=GpsPosition`;
 
-    const batches = [];
-    for (let i = 0; i < vehicleIds.length; i += FLEET_BATCH_SIZE) {
-      batches.push(vehicleIds.slice(i, i + FLEET_BATCH_SIZE).join(','));
+    // vehicledata endpoint supports multi-vehicle requests — send all IDs at once
+    const allIds = vehicleIds.join(',');
+    let allResults = [];
+    try {
+      const resp = await apiGet(`/da/vehicledata/${allIds}?${qs}`);
+      if (Array.isArray(resp)) allResults = resp;
+    } catch (err) {
+      console.warn('GPS fetch failed:', err.message);
     }
 
-    const results = await runRequestPool(
-      batches.map(ids => () => apiGet(`/da/vehicledata/${ids}?${qs}`)),
-      FLEET_CONCURRENCY
-    );
-
     const gpsPoints = {};
-    results.forEach(r => {
-      if (r.status !== 'fulfilled' || !Array.isArray(r.value)) return;
-      r.value.forEach(item => {
-        if (item.valueType !== 'GpsPosition') return;
-        const vals = item.values;
+    allResults.forEach(item => {
+      if (item.valueType !== 'GpsPosition') return;
+      const vals = item.values;
         if (!vals || vals.length === 0) return;
         const lastGps = vals[vals.length - 1].value;
         if (!lastGps) return;
@@ -951,7 +949,6 @@
 
         if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return;
         gpsPoints[item.vehicleId] = { lat, lng };
-      });
     });
 
     state.fleetGps = gpsPoints;
