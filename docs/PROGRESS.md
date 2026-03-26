@@ -43,9 +43,10 @@
 | 31 | Smart refresh: only query online trucks, 3-min full cycle, 1-min hot-truck cycle | ✅ Done | 2026-03-26 |
 | 32 | API audit vs Swagger spec: documented bugs, rate limit strategy, unused endpoints | ✅ Done | 2026-03-26 |
 | 33 | Temperature sort fix: sort by actual max °C descending (was bucket-then-name) | ✅ Done | 2026-03-26 |
-| 34 | Fleet→drill-down cache: reuse stored wheeldata history, skip duplicate API call | ✅ Done | 2026-03-26 |
-| 35 | Trend arrows (↑↓→) next to temperature in fleet grid (±2°C threshold) | ✅ Done | 2026-03-26 |
-| 36 | Map z-order: hot/overheating truck markers render on top of OK/offline markers | ✅ Done | 2026-03-26 |
+| 34 | Trend arrows (↑↓→) in fleet grid — ±0.5°C threshold, compares across refresh cycles | ✅ Done | 2026-03-26 |
+| 35 | Map z-order: hot/overheating truck markers render on top of OK/offline markers | ✅ Done | 2026-03-26 |
+| 36 | Fleet lookback reduced from 1h to 30min — halves bandwidth, same truck count (72) | ✅ Done | 2026-03-26 |
+| 37 | Drill-down cache: revisiting a truck loads instantly from cache, Fetch Data refreshes | ✅ Done | 2026-03-26 |
 
 ## Architecture Decisions
 
@@ -56,9 +57,9 @@
 | Chart.js for visualisation | Lightweight, no build step, time-series support |
 | Batch API calls (1 truck/request) | API silently drops data in multi-vehicle requests; individual calls return all data |
 | 3-min full refresh + 1-min hot refresh | Trade freshness for staying under 4000 req/hr; hot trucks get priority monitoring |
-| Cache fleet wheeldata for drill-down | Removed — fleet now fetches only latest value; drill-down always makes own API call |
+| Drill-down cache per vehicleId | Revisiting a truck loads instantly from in-memory cache; Fetch Data always refreshes |
 | Trend arrow ±0.5°C threshold | Sensitive enough to catch real changes; compares current vs previous refresh cycle |
-| Fleet 5-min lookback window | Only fetch latest reading per sensor — minimise bandwidth; drill-down fetches full user-selected range |
+| Fleet 30-min lookback window | Sensors report every 15–30 min; 30 min catches latest reading while halving data vs 1h |
 | Map z-order by status | Critical markers (zIndexOffset 300) always visible on top of OK/offline markers |
 | Online-only truck filtering | Skip trucks with no `lastContact` in past 1h — saves ~10 unnecessary API requests per cycle |
 | Temperature-only monitoring | Reduces API volume from ~5,700 MB/hr to ~660 MB/hr (under 1000 MB limit) |
@@ -125,9 +126,10 @@
 - Reconnect now switches into Fleet Overview with visible refresh/loading feedback and restores live controls when the refresh completes
 - Development/testing banner added below the TyreSense title for local and test environments
 - Fleet map markers are now populated from the same refresh cycle as the fleet table instead of lagging behind on a later async step
-- Fleet grid shows trend arrows (↑↓→) next to each temperature reading — red up-arrow for rising, green down-arrow for falling, grey for stable
-- Clicking a truck in fleet grid instantly shows cached 1h data (with toast notification) — no duplicate API call
+- Fleet grid shows trend arrows (↑↓→) next to each temperature reading (±0.5°C threshold) — compares current vs previous refresh cycle
+- Clicking a previously viewed truck loads instantly from drill-down cache (toast: "click Fetch Data to refresh")
 - Map markers for hot/overheating trucks render on top of other markers
+- Fleet lookback reduced from 1h to 30min — halves API data volume while maintaining 72 trucks with data
 - Fleet age and last-contact values now match live TyreSense freshness because timezone-less API timestamps are normalised correctly
 - **v3.0 HotTyre Sense**: Rebranded from TyreSense to HotTyre Sense — temperature-focused fleet monitoring
 - Removed Pressure, Cold Pressure, and Alert Status from fleet grid, charts, and wheel visual
