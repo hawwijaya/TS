@@ -92,6 +92,7 @@ Contact: info@rimex.com (RIMEX Supply Ltd, Vancouver, BC)
 ### Implementation Notes
 
 - The TyreSense `/da/wheeldata` endpoint only honors the first `wheelValues` parameter in a request, so the dashboard fetches wheel value types separately and merges the results
+- Fleet wheeldata requests now batch multiple vehicle IDs per request again; the app keeps batches capped to reduce URL size and retry impact
 - The local Node proxy now guards its HTTPS-to-HTTP fallback path to avoid duplicate header writes during reconnect and fleet refresh bursts
 - The local Node server now reads `.env.local` on startup so localhost uses the same token configuration without requiring a manual shell export
 - Fleet Overview refresh now coordinates wheel data and GPS loading in parallel, then renders the table and map from the same refresh cycle

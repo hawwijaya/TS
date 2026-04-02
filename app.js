@@ -26,6 +26,35 @@
     grader: '🛤️', roller: '🛞', scraper: '🔧', sleipner: '🛷', watercart: '💧'
   };
 
+  const WHEELED_LOADER_ICON = '🚜';
+
+  function isWheeledLoader(vehicle) {
+    if (!vehicle || typeof vehicle.name !== 'string') return false;
+    return /^LR/i.test(vehicle.name.trim());
+  }
+
+  function getVehicleTypeKey(vehicle) {
+    if (!vehicle) return '';
+
+    const vehicleName = typeof vehicle.name === 'string' ? vehicle.name.trim() : '';
+    if (/^LR/i.test(vehicleName)) {
+      return 'loader';
+    }
+
+    return typeof vehicle.type === 'string' ? vehicle.type.toLowerCase() : '';
+  }
+
+  function getVehicleTypeLabel(vehicle) {
+    return getVehicleTypeKey(vehicle) || vehicle.type || 'Unknown';
+  }
+
+  function getVehicleIcon(vehicle) {
+    if (isWheeledLoader(vehicle)) {
+      return WHEELED_LOADER_ICON;
+    }
+    return VEHICLE_TYPE_ICONS[getVehicleTypeKey(vehicle)] || '🚛';
+  }
+
   // ---- State ----
   let state = {
     demoMode: false,
@@ -439,14 +468,16 @@
   function renderVehicles(filter = '') {
     dom.vehiclesList.innerHTML = '';
     const lf = filter.toLowerCase();
-    const filtered = state.vehicles.filter(v =>
-      v.name.toLowerCase().includes(lf) || (v.type || '').toLowerCase().includes(lf)
-    );
+    const filtered = state.vehicles.filter(v => {
+      const vehicleName = typeof v.name === 'string' ? v.name.toLowerCase() : '';
+      const vehicleType = getVehicleTypeLabel(v).toLowerCase();
+      return vehicleName.includes(lf) || vehicleType.includes(lf);
+    });
     filtered.forEach(vehicle => {
       const el = document.createElement('div');
       el.className = 'nav-item';
       el.dataset.vehicleId = vehicle.vehicleId;
-      const icon = VEHICLE_TYPE_ICONS[vehicle.type] || '🚛';
+      const icon = getVehicleIcon(vehicle);
       el.innerHTML = `<span>${icon}</span> ${escapeHtml(vehicle.name)} <span class="item-badge">${vehicle.positions || 0} pos</span>`;
       el.addEventListener('click', () => selectVehicle(vehicle));
       dom.vehiclesList.appendChild(el);
@@ -476,9 +507,9 @@
 
   // ---- Update vehicle info panel ----
   function updateVehicleInfo(v) {
-    const icon = VEHICLE_TYPE_ICONS[v.type] || '🚛';
+    const icon = getVehicleIcon(v);
     $('#info-vehicle-name').textContent = v.name;
-    $('#info-vehicle-type').textContent = `${icon} ${v.type || 'Unknown'}`;
+    $('#info-vehicle-type').textContent = `${icon} ${getVehicleTypeLabel(v)}`;
     $('#info-vehicle-positions').textContent = v.positions || '—';
     $('#info-vehicle-controller').textContent = v.controllerSn || '—';
     $('#info-vehicle-lastcontact').textContent = formatDate(v.lastContact);
@@ -500,7 +531,8 @@
 
       if (state.demoMode) {
         await delay(400);
-        const basePSI = v.type === 'haultruck' ? 100 : v.type === 'loader' ? 85 : 90;
+        const vehicleType = getVehicleTypeKey(v);
+        const basePSI = vehicleType === 'haultruck' ? 100 : vehicleType === 'loader' ? 85 : 90;
         const tempBase = 45;
         wheelResp = generateWheelTimeSeries(v.positions, basePSI, tempBase, startTime, endTime);
         vehResp = generateVehicleTimeSeries(startTime, endTime);
@@ -721,7 +753,7 @@
 
   const FLEET_REFRESH_INTERVAL = 180; // seconds — normal full refresh (online trucks)
   const FLEET_HOT_REFRESH_INTERVAL = 60; // seconds — fast refresh for hot trucks only
-  const FLEET_BATCH_SIZE = 1;        // 1 truck per API call (API only returns 1 vehicle's data per multi-vehicle request)
+  const FLEET_BATCH_SIZE = 50;       // batch multiple vehicleIds per wheeldata request; keep URLs moderate
   const FLEET_CONCURRENCY = 3;       // parallel API calls (keep low to avoid 503 rate limit)
   const FLEET_DATA_LOOKBACK_HOURS = 1;
   const FLEET_GPS_LOOKBACK_HOURS = 1;
@@ -837,11 +869,11 @@
     const endT = now.toISOString();
     const startT = lookbackAgo.toISOString();
 
-    // IMPORTANT: The TyreSense API only returns data for the FIRST wheelValues
-    // parameter per request, so we must make separate calls per value type.
-    const valueTypes = ['Temperature'];
+    // The TyreSense API still only honors the first wheelValues parameter,
+    // so keep one request per value type while batching multiple vehicleIds.
+    const valueTypes = WHEEL_VALUE_TYPES;
 
-    // Split trucks into batches
+    // Split trucks into multi-vehicle batches to reduce request volume.
     const batchIds = [];
     for (let i = 0; i < trucks.length; i += FLEET_BATCH_SIZE) {
       const batch = trucks.slice(i, i + FLEET_BATCH_SIZE);
@@ -867,7 +899,7 @@
       }
     });
     if (failCount > 0) {
-      console.warn(`Fleet data: ${failCount}/${settled.length} batches failed (likely 503 rate limit)`);
+      console.warn(`Fleet data: ${failCount}/${settled.length} batch request(s) failed (likely 503 rate limit)`);
     }
 
     // Process results — store only latest value per position (minimal bandwidth)

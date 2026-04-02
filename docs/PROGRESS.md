@@ -48,6 +48,7 @@
 | 36 | Fleet lookback reduced from 1h to 30min — halves bandwidth, same truck count (72) | ✅ Done | 2026-03-26 |
 | 37 | Drill-down cache: revisiting a truck loads instantly from cache, Fetch Data refreshes | ✅ Done | 2026-03-26 |
 | 38 | Localhost startup now auto-loads `.env.local`, matching Vercel token behaviour | ✅ Done | 2026-04-02 |
+| 39 | Multi-vehicle wheeldata batching restored after upstream API fix | ✅ Done | 2026-04-02 |
 
 ## Architecture Decisions
 
@@ -56,7 +57,7 @@
 | Vanilla JS (no framework) | Minimal dependencies, fast load, easy to deploy |
 | Node.js proxy server | CORS bypass, HTTPS handling, static file serving |
 | Chart.js for visualisation | Lightweight, no build step, time-series support |
-| Batch API calls (1 truck/request) | API silently drops data in multi-vehicle requests; individual calls return all data |
+| Batch API calls (up to 50 trucks/request) | Upstream multi-vehicle wheeldata support is fixed again; batched IDs reduce request volume while keeping request URLs manageable |
 | 3-min full refresh + 1-min hot refresh | Trade freshness for staying under 4000 req/hr; hot trucks get priority monitoring |
 | Drill-down cache per vehicleId | Revisiting a truck loads instantly from in-memory cache; Fetch Data always refreshes |
 | Trend arrow ±0.5°C threshold | Sensitive enough to catch real changes; compares current vs previous refresh cycle |
@@ -82,6 +83,7 @@
 | 2026-03-25 | `royhill.tyresense.com` → ENOTFOUND. `hio.tyresense.com` → ENOTFOUND. |
 | 2026-03-25 | `australia.tyresense.com` → 23.101.230.162 (Azure). **SSL works. API responds.** |
 | 2026-03-25 | Confirmed: clientId=26 (Hancock Iron Ore), areaId=32 (Roy Hill Mine), 95 haul trucks. |
+| 2026-04-02 | Reverified `/da/wheeldata` with multi-vehicle IDs; fleet fetch path switched back from single-vehicle requests to batched requests. |
 | 2026-04-02 | Localhost-only connection failure traced to missing `.env.local` loading in `server.js`; fixed and verified against `/api/da/areas`. |
 
 ## Live Fleet Data Summary
@@ -104,7 +106,7 @@
 | Alert status data sparse | Low | Not all trucks have alert threshold config |
 | VPN blocks API connection | Info | Documented — do not use VPN |
 | Proxy fallback could write headers twice under retry load | High | Fixed 2026-03-26 |
-| API multi-vehicle wheeldata returns only 1 vehicle's data | High | Fixed — switched to batch size 1 |
+| Historical upstream multi-vehicle wheeldata bug | Info | Resolved upstream on 2026-04-02; fleet fetch now batches multiple vehicle IDs per request |
 | API rate limit 4000 requests/hour | High | Fixed — smart refresh: 3-min cycle, online-only trucks, 1-min hot-truck cycle (~3,400 req/hr) |
 | API timestamps omit timezone information | Medium | Fixed in app parsing on 2026-03-26 |
 | Age display uses wheeldata start (too old) | Medium | Fixed — now uses vehicle `lastContact` (controller heartbeat) |
@@ -147,3 +149,5 @@
 - Only online trucks (lastContact within 1h) are queried — offline trucks skipped to save API quota
 - Batch size changed from 10 to 1 per API call — fixed silent data loss affecting 61 trucks
 - Localhost now uses `.env.local` automatically, so Connect to API succeeds without manually exporting the token in the shell
+- LR* vehicles now render with the loader icon in the vehicle list and detail panel
+- Fleet wheeldata refreshes now batch multiple vehicle IDs per request instead of issuing one request per truck
