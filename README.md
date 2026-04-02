@@ -14,11 +14,13 @@ Real-time tyre monitoring dashboard for the TyreSense API (RIMEX Supply Ltd).
 
 ```bash
 cd tyresense
-set TYRESENSE_JWT_TOKEN=your_token_here
+echo TYRESENSE_JWT_TOKEN=your_token_here > .env.local
 node server.js
 ```
 
 Open your browser to **http://localhost:3001**
+
+The local Node server now loads `.env.local` automatically at startup. `JWT_SECRET` is also accepted as a fallback name, but `TYRESENSE_JWT_TOKEN` remains the preferred key.
 
 ## Vercel Deployment
 
@@ -64,7 +66,8 @@ Important deployment notes:
 
 Edit API settings via the sidebar panel, or configure server environment variables:
 - `API_HOST` — default: `australia.tyresense.com`
-- `TYRESENSE_JWT_TOKEN` — recommended for local server and Vercel
+- `TYRESENSE_JWT_TOKEN` — recommended for local server and Vercel; loaded automatically from `.env.local` in local development
+- `JWT_SECRET` — supported fallback token name for local server and serverless proxy code
 - `TYRESENSE_API_HOST` — optional override for the upstream TyreSense host
 
 ### API Reference
@@ -90,6 +93,7 @@ Contact: info@rimex.com (RIMEX Supply Ltd, Vancouver, BC)
 
 - The TyreSense `/da/wheeldata` endpoint only honors the first `wheelValues` parameter in a request, so the dashboard fetches wheel value types separately and merges the results
 - The local Node proxy now guards its HTTPS-to-HTTP fallback path to avoid duplicate header writes during reconnect and fleet refresh bursts
+- The local Node server now reads `.env.local` on startup so localhost uses the same token configuration without requiring a manual shell export
 - Fleet Overview refresh now coordinates wheel data and GPS loading in parallel, then renders the table and map from the same refresh cycle
 - The local proxy uses keep-alive upstream agents to reduce repeated TLS connection setup during multi-request fleet refreshes
 - TyreSense timestamps such as `lastContact` and wheel sample `start` values can arrive without an explicit timezone; the app now treats those values as UTC to preserve correct freshness calculations in Roy Hill local time

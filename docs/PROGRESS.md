@@ -1,6 +1,6 @@
 # HotTyre Sense — Project Progress & Status
 
-**Last Updated**: 2026-03-26  
+**Last Updated**: 2026-04-02  
 **Sprint**: v3.0 — HotTyre Sense Rebrand (Temperature-Only Fleet Monitoring)  
 **Server**: `australia.tyresense.com` (Azure, 23.101.230.162)
 
@@ -47,6 +47,7 @@
 | 35 | Map z-order: hot/overheating truck markers render on top of OK/offline markers | ✅ Done | 2026-03-26 |
 | 36 | Fleet lookback reduced from 1h to 30min — halves bandwidth, same truck count (72) | ✅ Done | 2026-03-26 |
 | 37 | Drill-down cache: revisiting a truck loads instantly from cache, Fetch Data refreshes | ✅ Done | 2026-03-26 |
+| 38 | Localhost startup now auto-loads `.env.local`, matching Vercel token behaviour | ✅ Done | 2026-04-02 |
 
 ## Architecture Decisions
 
@@ -69,6 +70,7 @@
 | Fleet table and map refresh together | Prevent the map from lagging behind the table and looking empty during a completed refresh |
 | Keep-alive upstream proxying | Reduce handshake churn and stabilise multi-request fleet refreshes |
 | Treat timezone-less TyreSense timestamps as UTC | Prevent false 8-hour staleness in AWST and align age with production |
+| Auto-load `.env.local` in local Node server | Make localhost consume the same token file consistently without manual shell env setup |
 
 ## API Connectivity Log
 
@@ -80,6 +82,7 @@
 | 2026-03-25 | `royhill.tyresense.com` → ENOTFOUND. `hio.tyresense.com` → ENOTFOUND. |
 | 2026-03-25 | `australia.tyresense.com` → 23.101.230.162 (Azure). **SSL works. API responds.** |
 | 2026-03-25 | Confirmed: clientId=26 (Hancock Iron Ore), areaId=32 (Roy Hill Mine), 95 haul trucks. |
+| 2026-04-02 | Localhost-only connection failure traced to missing `.env.local` loading in `server.js`; fixed and verified against `/api/da/areas`. |
 
 ## Live Fleet Data Summary
 
@@ -105,6 +108,7 @@
 | API rate limit 4000 requests/hour | High | Fixed — smart refresh: 3-min cycle, online-only trucks, 1-min hot-truck cycle (~3,400 req/hr) |
 | API timestamps omit timezone information | Medium | Fixed in app parsing on 2026-03-26 |
 | Age display uses wheeldata start (too old) | Medium | Fixed — now uses vehicle `lastContact` (controller heartbeat) |
+| Localhost did not read `.env.local` | Medium | Fixed in `server.js` on 2026-04-02 |
 | `rejectUnauthorized: false` in proxy | Low (dev) | Acceptable for demo; document for production hardening |
 
 ## File Inventory
@@ -142,3 +146,4 @@
 - Countdown timer shows 🔥 when hot trucks exist and a fast refresh is coming
 - Only online trucks (lastContact within 1h) are queried — offline trucks skipped to save API quota
 - Batch size changed from 10 to 1 per API call — fixed silent data loss affecting 61 trucks
+- Localhost now uses `.env.local` automatically, so Connect to API succeeds without manually exporting the token in the shell

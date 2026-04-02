@@ -4,12 +4,38 @@ const url = require('url');
 const path = require('path');
 const fs = require('fs');
 
+loadLocalEnv();
+
 const PORT = process.env.PORT || 3001;
 let apiHost = 'australia.tyresense.com';
 let apiProtocol = 'https';
 let apiPort = 443;
 const STATIC_DIR = __dirname;
 const envToken = process.env.TYRESENSE_JWT_TOKEN || process.env.JWT_SECRET || '';
+
+function loadLocalEnv() {
+  const envPath = path.join(__dirname, '.env.local');
+  if (!fs.existsSync(envPath)) return;
+
+  const raw = fs.readFileSync(envPath, 'utf8');
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex <= 0) continue;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    if (!key || Object.prototype.hasOwnProperty.call(process.env, key)) continue;
+
+    let value = trimmed.slice(separatorIndex + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[key] = value;
+  }
+}
 
 const MIME_TYPES = {
   '.html': 'text/html',
