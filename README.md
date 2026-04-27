@@ -61,6 +61,8 @@ Important deployment notes:
 | `index.html`| Dashboard HTML                               |
 | `style.css` | Dark theme styling                           |
 | `app.js`    | Application logic, API calls, Chart.js charts|
+| `loader.svg` / `loader.png` | Loader icon source assets for future UI and map marker use |
+| `dump_truck.svg` / `dump_truck.png` | Dump-truck icon source assets for future UI and map marker use |
 
 ### Configuration
 
@@ -98,3 +100,4 @@ Contact: info@rimex.com (RIMEX Supply Ltd, Vancouver, BC)
 - Fleet Overview refresh now coordinates wheel data and GPS loading in parallel, then renders the table and map from the same refresh cycle
 - The local proxy uses keep-alive upstream agents to reduce repeated TLS connection setup during multi-request fleet refreshes
 - TyreSense timestamps such as `lastContact` and wheel sample `start` values can arrive without an explicit timezone; the app now treats those values as UTC to preserve correct freshness calculations in Roy Hill local time
+- The repository now also includes standalone loader and dump-truck SVG/PNG assets so future UI and map work can move off emoji-only vehicle markers without sourcing artwork elsewhere

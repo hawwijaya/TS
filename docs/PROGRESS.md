@@ -1,6 +1,6 @@
 # HotTyre Sense — Project Progress & Status
 
-**Last Updated**: 2026-04-02  
+**Last Updated**: 2026-04-28  
 **Sprint**: v3.0 — HotTyre Sense Rebrand (Temperature-Only Fleet Monitoring)  
 **Server**: `australia.tyresense.com` (Azure, 23.101.230.162)
 
@@ -49,6 +49,7 @@
 | 37 | Drill-down cache: revisiting a truck loads instantly from cache, Fetch Data refreshes | ✅ Done | 2026-03-26 |
 | 38 | Localhost startup now auto-loads `.env.local`, matching Vercel token behaviour | ✅ Done | 2026-04-02 |
 | 39 | Multi-vehicle wheeldata batching restored after upstream API fix | ✅ Done | 2026-04-02 |
+| 40 | Standalone loader and dump-truck SVG/PNG icon assets added for future UI and map marker work | ✅ Done | 2026-04-28 |
 
 ## Architecture Decisions
 
@@ -151,3 +152,4 @@
 - Localhost now uses `.env.local` automatically, so Connect to API succeeds without manually exporting the token in the shell
 - LR* vehicles now render with the loader icon in the vehicle list and detail panel
 - Fleet wheeldata refreshes now batch multiple vehicle IDs per request instead of issuing one request per truck
+- Added checked-in `loader` and `dump_truck` SVG/PNG assets so later vehicle-marker work can switch away from emoji placeholders without hunting for source files

@@ -1,0 +1,32 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <g stroke="#000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- load -->
+    <path d="M28 20 C26 10, 38 6, 44 14 C48 10, 56 16, 54 28 L28 28 Z" fill="#b0aba5" />
+    <!-- load dots -->
+    <circle cx="46" cy="18" r="1" fill="#000" stroke="none" />
+    <circle cx="48" cy="22" r="1" fill="#000" stroke="none" />
+    <circle cx="51" cy="24" r="1" fill="#000" stroke="none" />
+    <!-- exhaust block -->
+    <path d="M4 28 L10 28 L10 38 L4 38 Z" fill="#a19d9d" />
+    <path d="M2 38 L8 38 L8 44 L2 44 Z" fill="#a19d9d" />
+    <rect x="5" y="24" width="2" height="4" fill="#000" stroke="none" />
+    <rect x="8" y="24" width="2" height="4" fill="#000" stroke="none" />
+    <!-- main bed -->
+    <path d="M8 18 L14 18 L14 23 L28 21 L56 21 L62 34 L52 38 L30 38 L24 35 L14 35 L10 28 L8 28 Z" fill="#ffcb2f" />
+    <!-- ribs -->
+    <line x1="33" y1="21" x2="36" y2="38" />
+    <line x1="41" y1="21" x2="43" y2="39" />
+    <line x1="49" y1="21" x2="50" y2="37" />
+    <!-- cab window box -->
+    <path d="M14 24 L24 24 L24 35 L14 35 Z" fill="#8c471c" />
+    <rect x="16" y="26" width="3" height="6" fill="#cce5ff" />
+    <rect x="20" y="26" width="3" height="6" fill="#cce5ff" />
+    <!-- chassis bottom -->
+    <path d="M14 35 L28 35 A5 5 0 0 0 38 35 L52 35 L48 44 L40 44 L40 46 L30 46 L30 44 L22 44 L18 39 L14 39 Z" fill="#ffcb2f" />
+    <!-- wheels -->
+    <circle cx="18" cy="46" r="7" fill="#808080" />
+    <circle cx="18" cy="46" r="3" fill="#fff" />
+    <circle cx="46" cy="46" r="7" fill="#808080" />
+    <circle cx="46" cy="46" r="3" fill="#fff" />
+  </g>
+</svg>
